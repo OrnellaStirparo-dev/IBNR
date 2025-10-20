@@ -1,0 +1,4 @@
+import pandas as pd
+
+df = pd.read_excel("data/raw/ssn_2025_siniestro_casco.xlsx")
+df.head()
