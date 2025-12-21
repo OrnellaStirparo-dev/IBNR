@@ -73,6 +73,107 @@ def create_claims_triangle(df: pd.DataFrame,
         print("✅ Data already in triangle format")
         return df[['accident_year', 'development_year', 'cumulative_claims']].copy()
     
+    # Remove rows that are clearly headers/descriptions (all non-numeric or mostly text)
+    # Check first few rows - if they're all text, they're likely headers
+    rows_to_drop = []
+    for i in range(min(5, len(df))):
+        row = df.iloc[i]
+        # If row has mostly non-numeric or very long text values, it's likely a header
+        text_count = sum(1 for val in row if isinstance(val, str) and len(str(val)) > 50)
+        if text_count > len(row) * 0.5:
+            rows_to_drop.append(df.index[i])
+            print(f"   Removed header/description row {i+1}")
+    if rows_to_drop:
+        df = df.drop(rows_to_drop)
+        df = df.reset_index(drop=True)
+    
+    # Check if data is in pivot/table format (rows = accident years, columns = development periods)
+    # This is common in Excel files where the triangle is already structured
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    non_numeric_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
+    
+    # Also check if index contains years
+    index_has_years = False
+    if df.index.dtype == 'object' or df.index.dtype == 'int64':
+        try:
+            index_years = pd.to_numeric(df.index, errors='coerce')
+            if index_years.notna().sum() > len(df) * 0.5:
+                index_has_years = True
+        except:
+            pass
+    
+    # If we have mostly numeric columns and one non-numeric (likely accident year column)
+    # OR if the index contains years
+    if (len(numeric_cols) >= 1 and len(non_numeric_cols) <= 2) or index_has_years:
+        print("🔍 Detected pivot table format - attempting to convert...")
+        try:
+            # Try to identify accident year column
+            if index_has_years:
+                # Use index as accident years
+                df['accident_year'] = pd.to_numeric(df.index, errors='coerce')
+                print("   Using index as accident years")
+            elif len(non_numeric_cols) > 0:
+                # First non-numeric column is likely accident year
+                acc_col = non_numeric_cols[0]
+                # Try to extract year from first column
+                if df[acc_col].dtype == 'object':
+                    # Try to convert to numeric (might be years as strings)
+                    df['accident_year'] = pd.to_numeric(df[acc_col], errors='coerce')
+                    if df['accident_year'].isna().all() or df['accident_year'].isna().sum() > len(df) * 0.5:
+                        # If that fails, try to extract year from strings
+                        year_extracted = df[acc_col].astype(str).str.extract(r'(\d{4})')[0]
+                        df['accident_year'] = pd.to_numeric(year_extracted, errors='coerce')
+                else:
+                    df['accident_year'] = pd.to_numeric(df[acc_col], errors='coerce')
+                print(f"   Using column '{acc_col}' as accident years")
+            else:
+                # No non-numeric columns - try to use row numbers or first numeric column
+                # Assume rows are sequential years starting from some base year
+                # This is a fallback - user should specify
+                print("   ⚠️  Could not identify accident year column automatically")
+                raise ValueError("Cannot auto-detect accident years in pivot format")
+            
+            if df['accident_year'].isna().all():
+                raise ValueError("Could not extract accident years")
+            
+            # Development years are the numeric column names
+            triangle_list = []
+            for idx, row in df.iterrows():
+                ay = df.loc[idx, 'accident_year']
+                if pd.isna(ay):
+                    continue
+                for col_idx, col in enumerate(numeric_cols):
+                    # Try to extract development year from column name
+                    dev_year_str = str(col)
+                    # Try to find number in column name
+                    dev_match = pd.Series([dev_year_str]).str.extract(r'(\d+)')[0]
+                    if len(dev_match) > 0 and not dev_match.isna().iloc[0]:
+                        try:
+                            dev_year = int(dev_match.iloc[0])
+                        except:
+                            dev_year = col_idx + 1
+                    else:
+                        # Use column index as development year
+                        dev_year = col_idx + 1
+                    
+                    value = row[col]
+                    if pd.notna(value) and pd.notna(ay):
+                        triangle_list.append({
+                            'accident_year': int(ay),
+                            'development_year': dev_year,
+                            'cumulative_claims': float(value)
+                        })
+            
+            if len(triangle_list) > 0:
+                result_df = pd.DataFrame(triangle_list)
+                # Calculate cumulative if needed (might already be cumulative)
+                result_df = result_df.sort_values(['accident_year', 'development_year'])
+                print(f"✅ Converted pivot table to triangle format: {len(result_df)} records")
+                return result_df[['accident_year', 'development_year', 'cumulative_claims']]
+        except Exception as e:
+            print(f"⚠️  Pivot table conversion failed: {e}")
+            # Continue with normal processing
+    
     # Auto-detect columns if not provided
     if accident_year_col is None:
         possible_accident_cols = ['año_siniestro', 'accident_year', 'ay', 'año', 'year', 

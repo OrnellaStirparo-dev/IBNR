@@ -43,14 +43,22 @@ def main():
     
     # Transform to triangle format
     print("\n🔺 Creating claims triangle...")
+    triangle_df = None
     try:
         triangle_df = create_claims_triangle(cleaned_df)
         print(f"   Triangle shape: {triangle_df.shape}")
         print(f"   Sample data:\n{triangle_df.head(10)}")
     except Exception as e:
         print(f"❌ Error creating triangle: {e}")
-        print("   Attempting to use raw data as-is...")
-        triangle_df = cleaned_df
+        print("\n💡 The data format might be different. Please check:")
+        print(f"   - Columns in your data: {cleaned_df.columns.tolist()}")
+        print(f"   - First few rows:\n{cleaned_df.head()}")
+        print("\n   You may need to specify column names manually:")
+        print("   triangle_df = create_claims_triangle(cleaned_df,")
+        print("       accident_year_col='your_accident_year_column',")
+        print("       development_year_col='your_dev_year_column',")
+        print("       claims_col='your_claims_column')")
+        raise ValueError("Could not create triangle. Please check your data format and column names.")
     
     print("\n" + "=" * 60)
     print("TRADITIONAL METHODS")
@@ -195,9 +203,13 @@ def main():
     print("SUMMARY")
     print("=" * 60)
     print("✅ All models have been executed")
-    print(f"   Triangle data: {len(triangle_df)} records")
-    print(f"   Accident years: {triangle_df['accident_year'].min():.0f} - {triangle_df['accident_year'].max():.0f}")
-    print(f"   Development years: 1 - {triangle_df['development_year'].max():.0f}")
+    if triangle_df is not None and 'accident_year' in triangle_df.columns:
+        print(f"   Triangle data: {len(triangle_df)} records")
+        print(f"   Accident years: {triangle_df['accident_year'].min():.0f} - {triangle_df['accident_year'].max():.0f}")
+        print(f"   Development years: 1 - {triangle_df['development_year'].max():.0f}")
+    else:
+        print(f"   ⚠️  Triangle data format issue - {len(cleaned_df) if triangle_df is None else len(triangle_df)} records")
+        print(f"   Available columns: {cleaned_df.columns.tolist() if triangle_df is None else triangle_df.columns.tolist()}")
     
     if summary_df is not None:
         print(f"\n📊 Model Results Summary:")
