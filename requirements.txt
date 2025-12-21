@@ -7,3 +7,4 @@ tensorflow
 chainladder
 jupyter
 seaborn
+openpyxl

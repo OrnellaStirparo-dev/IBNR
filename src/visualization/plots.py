@@ -12,5 +12,6 @@ def plot_model_comparison(results_df: pd.DataFrame):
     plt.title("Model Comparison (Lower RMSE = Better)")
     plt.ylabel("RMSE")
     plt.xlabel("Model")
+    plt.xticks(rotation=45)
     plt.tight_layout()
     plt.show()
