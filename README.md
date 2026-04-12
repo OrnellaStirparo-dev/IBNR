@@ -1,118 +1,66 @@
-# IBNR Estimation Project
-Thesis repo for IBNR (Incurred But Not Reported) claims estimation using traditional actuarial methods and machine learning.
+# IBNR estimation — traditional vs ML
 
-## Available Models
+Thesis-style workflow: load **insurance policy / claims** data from an Excel file under `data/raw/`, build a **loss development triangle**, then compare **classical reserving methods** (via [chainladder](https://github.com/casact/chainladder)) with **modern tabular ML** (gradient boosting and a small PyTorch MLP).
 
-This repository includes the following IBNR estimation models:
+## Data
 
-### Traditional Actuarial Methods
-1. **Chain Ladder** (`src/traditional/chainladder_model.py`)
-   - Classic chain ladder method using the `chainladder` library
-   - Estimates ultimate claims based on development factors
+- Put your workbook in `data/raw/` (default name: `ssn_2025_siniestro_casco.xlsx`), or set `IBNR_RAW_XLSX` to a path.
+- Supported shapes:
+  - **Transactional payments** (recommended): `fecha_siniestro`, `fecha_pago`, `importe_pagado` (column names are normalized to lowercase with underscores).
+  - **Long triangle**: `accident_year`, `development_year`, `cumulative_claims`.
+  - **Pivot-style** triangles (Excel tables with year rows and development columns) — auto-detected when possible.
 
-2. **Bornhuetter-Ferguson** (`src/traditional/bf_model.py`)
-   - Combines Chain Ladder development factors with prior estimates
-   - Useful when you have external information about expected ultimate claims
+If the file is missing or not a valid `.xlsx` zip file, a small **demo** workbook is generated so `main.py` runs.
 
-### Machine Learning Methods
-3. **XGBoost** (`src/ml/xgboost_model.py`)
-   - Gradient boosting regression model
-   - Handles non-linear relationships in claims development
+## Traditional models
 
-4. **Random Forest** (`src/ml/random_forest.py`)
-   - Ensemble tree-based model
-   - Provides feature importance insights
+1. **Chain Ladder**
+2. **Mack chain ladder** (same mean ultimates; Mack machinery for diagnostics)
+3. **Bornhuetter–Ferguson** (chain-ladder ultimates used as `sample_weight` in chainladder)
+4. **Cape Cod** (chain-ladder ultimates as `sample_weight`)
 
-5. **Neural Network** (`src/ml/neural_network.py`)
-   - Deep learning model using TensorFlow/Keras
-   - Multi-layer perceptron for complex pattern recognition
+## ML / AI models
 
-## Data Format
+1. **LightGBM** — fast gradient boosting on tabular features  
+2. **CatBoost** — gradient boosting with strong defaults for mixed data  
+3. **XGBoost 2.x** — industry-standard boosted trees  
+4. **PyTorch MLP** — small fully connected network on the same features  
 
-The project expects claims data in Excel format (`ssn_2025_siniestro_casco.xlsx`). The triangle transformer (`src/data/transformer.py`) can handle multiple input formats:
+Features are built from the triangle: accident year, development year, calendar year, and lagged cumulative severity.
 
-1. **Already in triangle format**: Columns `accident_year`, `development_year`, `cumulative_claims`
-2. **Transactional data with dates**: Accident date and development date columns
-3. **Transactional data with years**: Accident year and development period columns
+ML models predict cumulative loss at the **maximum development period** in the triangle as a proxy for “ultimate” in a fixed horizon (aligned across models for comparison).
 
-The transformer automatically detects common column names:
-- Accident year: `año_siniestro`, `accident_year`, `ay`, etc.
-- Development year: `development_year`, `dev_year`, `dy`, etc.
-- Claims amount: `importe`, `monto`, `claims`, `cumulative_claims`, etc.
-
-## Usage
-
-### Setup
-
-To recreate the virtual environment:
+## Setup
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Running All Models
-
-Run the main script to execute all models:
+## Run
 
 ```bash
 python main.py
 ```
 
-This will:
-1. Load the Excel file from `data/raw/ssn_2025_siniestro_casco.xlsx`
-2. Clean and transform the data into a claims triangle
-3. Run all 5 models (Chain Ladder, Bornhuetter-Ferguson, XGBoost, Random Forest, Neural Network)
-4. Display results and metrics
+Inspect raw Excel layout:
 
-### Using Individual Models
-
-You can also import and use individual models:
-
-```python
-from src.data.load_data import load_claims_triangle
-from src.data.transformer import create_claims_triangle, clean_siniestros_data
-from src.traditional.chainladder_model import run_chainladder
-from src.traditional.bf_model import run_bornhuetter_ferguson
-from src.ml.xgboost_model import run_xgboost
-from src.ml.random_forest import run_random_forest
-from src.ml.neural_network import run_neural_network
-
-# Load and prepare data
-raw_df = load_claims_triangle()
-cleaned_df = clean_siniestros_data(raw_df)
-triangle_df = create_claims_triangle(cleaned_df)
-
-# Run a specific model
-ultimate = run_chainladder(triangle_df.pivot(index='accident_year', columns='development_year', values='cumulative_claims'))
+```bash
+python inspect_data.py
 ```
 
-## Project Structure
+## Layout
 
 ```
 IBNR/
-├── data/
-│   ├── raw/              # Raw Excel files
-│   └── processed/        # Processed data
+├── data/raw/              # Place your .xlsx here
 ├── src/
-│   ├── data/             # Data loading and transformation
-│   ├── traditional/      # Traditional actuarial methods
-│   ├── ml/               # Machine learning models
-│   ├── evaluation/       # Model evaluation and comparison
-│   └── visualization/    # Plotting and visualization
-├── notebooks/            # Jupyter notebooks for exploration
-├── main.py               # Main script to run all models
-└── requirements.txt      # Python dependencies
+│   ├── data/              # Load, demo data, triangle transform, chainladder I/O
+│   ├── traditional/       # Chain ladder, Mack, BF, Cape Cod
+│   ├── ml/                # LightGBM, CatBoost, XGBoost, PyTorch
+│   ├── evaluation/        # Metrics and comparison tables
+│   └── visualization/
+├── main.py
+└── requirements.txt
 ```
-
-## Dependencies
-
-- pandas: Data manipulation
-- numpy: Numerical computations
-- chainladder: Actuarial triangle methods
-- scikit-learn: Machine learning utilities
-- xgboost: Gradient boosting
-- tensorflow: Neural networks
-- matplotlib, seaborn: Visualization
-- openpyxl: Excel file reading

@@ -67,6 +67,59 @@ def create_claims_triangle(df: pd.DataFrame,
         .str.replace(" ", "_")
         .str.replace(r"[^\w_]", "", regex=True)
     )
+
+    # Transactional policy payments: accident date + payment date + amount
+    if {"fecha_siniestro", "fecha_pago"}.issubset(df.columns):
+        pay_col = None
+        for c in ("importe_pagado", "importe", "monto", "pago", "amount"):
+            if c in df.columns:
+                pay_col = c
+                break
+        if pay_col is None:
+            raise ValueError("fecha_siniestro/fecha_pago present but no payment amount column found.")
+        df["accident_year"] = pd.to_datetime(df["fecha_siniestro"], errors="coerce").dt.year
+        df["development_year"] = (
+            pd.to_datetime(df["fecha_pago"], errors="coerce").dt.year - df["accident_year"]
+        ) + 1
+        df["claims"] = pd.to_numeric(df[pay_col], errors="coerce")
+        df = df.dropna(subset=["accident_year", "development_year", "claims"])
+        df["accident_year"] = df["accident_year"].astype(int)
+        df["development_year"] = df["development_year"].astype(int)
+        df.loc[df["development_year"] < 1, "development_year"] = 1
+
+        triangle = df.groupby(["accident_year", "development_year"])["claims"].sum().reset_index()
+        triangle = triangle.sort_values(["accident_year", "development_year"])
+        triangle["cumulative_claims"] = triangle.groupby("accident_year")["claims"].cumsum()
+
+        accident_years = sorted(triangle["accident_year"].unique())
+        max_dev_year = int(triangle["development_year"].max())
+        full_triangle = []
+        for ay in accident_years:
+            ay_data = triangle[triangle["accident_year"] == ay]
+            for dy in range(1, max_dev_year + 1):
+                existing = ay_data[ay_data["development_year"] == dy]
+                if len(existing) > 0:
+                    full_triangle.append(
+                        {
+                            "accident_year": ay,
+                            "development_year": dy,
+                            "cumulative_claims": existing["cumulative_claims"].iloc[0],
+                        }
+                    )
+                else:
+                    full_triangle.append(
+                        {
+                            "accident_year": ay,
+                            "development_year": dy,
+                            "cumulative_claims": np.nan,
+                        }
+                    )
+        result = pd.DataFrame(full_triangle)
+        print(
+            f"✅ Built triangle from payment dates: {len(accident_years)} accident years, "
+            f"{max_dev_year} development periods"
+        )
+        return result[["accident_year", "development_year", "cumulative_claims"]]
     
     # Check if already in triangle format
     if all(col in df.columns for col in ['accident_year', 'development_year', 'cumulative_claims']):

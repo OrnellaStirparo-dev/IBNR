@@ -1,10 +1,13 @@
-pandas
-numpy
-matplotlib
-scikit-learn
-xgboost
-tensorflow
-chainladder
+pandas>=2.2
+numpy>=1.26
+matplotlib>=3.8
+seaborn>=0.13
+scikit-learn>=1.4
+openpyxl>=3.1
 jupyter
-seaborn
-openpyxl
+
+# ML / AI (tabular — current strong baselines)
+xgboost>=2.0
+lightgbm>=4.3
+catboost>=1.2
+torch>=2.2

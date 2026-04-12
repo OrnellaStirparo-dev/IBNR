@@ -3,6 +3,23 @@ import numpy as np
 from typing import Dict, Optional
 from .metrics import calculate_metrics
 
+
+def _latest_reported_per_accident_year(triangle_df: pd.DataFrame) -> pd.Series:
+    """Last **observed** cumulative per accident year (ignores NaN tail cells)."""
+
+    def _last_valid(s: pd.Series) -> float:
+        s = s.dropna()
+        return float(s.iloc[-1]) if len(s) else np.nan
+
+    out = (
+        triangle_df.sort_values("development_year")
+        .groupby("accident_year")["cumulative_claims"]
+        .apply(_last_valid)
+    )
+    out.index = [int(x) for x in out.index]
+    return out
+
+
 def compare_models_results(results: Dict[str, pd.DataFrame], 
                           triangle_df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -25,45 +42,29 @@ def compare_models_results(results: Dict[str, pd.DataFrame],
         # For traditional methods, predictions are usually ultimate claims
         # For ML methods, we need to extract predictions differently
         
-        if model_name in ["Chain Ladder", "Bornhuetter-Ferguson"]:
-            # These return ultimate claims - we can compare with latest reported
-            # Get latest development year for each accident year
-            latest_reported = triangle_df.groupby('accident_year')['cumulative_claims'].last()
-            
-            # Extract ultimate from predictions (may be in different format)
-            if isinstance(predictions_df, pd.Series):
-                ultimate = predictions_df
-            elif isinstance(predictions_df, pd.DataFrame):
-                # Try to extract ultimate column or use last column
-                if 'ultimate' in predictions_df.columns:
-                    ultimate = predictions_df['ultimate']
-                else:
-                    ultimate = predictions_df.iloc[:, -1]
+        if isinstance(predictions_df, pd.Series):
+            ultimate = predictions_df.copy()
+        elif isinstance(predictions_df, pd.DataFrame):
+            if "ultimate" in predictions_df.columns:
+                ultimate = predictions_df["ultimate"]
             else:
-                continue
-            
-            # Align indices
-            common_years = latest_reported.index.intersection(ultimate.index)
-            if len(common_years) > 0:
-                actual = latest_reported[common_years]
-                predicted = ultimate[common_years]
-                metrics = calculate_metrics(actual, predicted)
-                metrics['model'] = model_name
-                metrics['total_ultimate'] = predicted.sum()
-                metrics['total_ibnr'] = (predicted - actual).sum()
-                comparison_data.append(metrics)
+                ultimate = predictions_df.iloc[:, -1]
         else:
-            # ML models - use their test set predictions if available
-            # For now, just add placeholder
-            comparison_data.append({
-                'model': model_name,
-                'mae': np.nan,
-                'rmse': np.nan,
-                'mape': np.nan,
-                'r2': np.nan,
-                'total_ultimate': np.nan,
-                'total_ibnr': np.nan
-            })
+            continue
+        ultimate.index = [int(x) for x in ultimate.index]
+
+        latest_reported = _latest_reported_per_accident_year(triangle_df)
+        latest_reported.index = [int(x) for x in latest_reported.index]
+        common_years = latest_reported.index.intersection(ultimate.index)
+        if len(common_years) == 0:
+            continue
+        actual = latest_reported[common_years]
+        predicted = ultimate[common_years]
+        metrics = calculate_metrics(actual, predicted)
+        metrics["model"] = model_name
+        metrics["total_ultimate"] = predicted.sum()
+        metrics["total_ibnr"] = (predicted - actual).sum()
+        comparison_data.append(metrics)
     
     return pd.DataFrame(comparison_data)
 
@@ -79,13 +80,11 @@ def create_model_summary(triangle_df: pd.DataFrame,
     Returns:
         DataFrame with accident year and ultimate estimates from each model
     """
-    # Get accident years
-    accident_years = sorted(triangle_df['accident_year'].unique())
-    summary = pd.DataFrame({'accident_year': accident_years})
+    accident_years = sorted({int(x) for x in triangle_df["accident_year"].unique()})
+    summary = pd.DataFrame({"accident_year": accident_years})
     
-    # Add latest reported for reference
-    latest_reported = triangle_df.groupby('accident_year')['cumulative_claims'].last()
-    summary['latest_reported'] = summary['accident_year'].map(latest_reported)
+    latest_reported = _latest_reported_per_accident_year(triangle_df)
+    summary["latest_reported"] = summary["accident_year"].map(latest_reported)
     
     # Add each model's ultimate estimates
     for model_name, result in model_results.items():
@@ -95,7 +94,8 @@ def create_model_summary(triangle_df: pd.DataFrame,
         try:
             # Extract ultimate values
             if isinstance(result, pd.Series):
-                ultimate = result
+                ultimate = result.copy()
+                ultimate.index = [int(x) for x in ultimate.index]
             elif isinstance(result, pd.DataFrame):
                 if 'ultimate' in result.columns:
                     ultimate = result['ultimate']

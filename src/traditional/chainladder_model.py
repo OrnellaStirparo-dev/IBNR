@@ -1,8 +1,12 @@
-import chainladder as cl
+"""Chain ladder — volume-weighted link ratios (manual implementation, industry standard)."""
 
-def run_chainladder(triangle_df):
-    """Fit a Chain Ladder model and return ultimate claims."""
-    triangle = cl.Triangle(triangle_df)
-    model = cl.Chainladder().fit(triangle)
-    ultimate = model.predict().ultimate_
-    return ultimate
+from __future__ import annotations
+
+import pandas as pd
+
+from src.traditional.chain_ladder_manual import cumulative_pivot_from_long, ultimate_from_pivot
+
+
+def run_chainladder(triangle_df: pd.DataFrame) -> pd.Series:
+    pivot = cumulative_pivot_from_long(triangle_df)
+    return ultimate_from_pivot(pivot)
