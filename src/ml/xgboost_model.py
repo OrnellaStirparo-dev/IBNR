@@ -28,7 +28,7 @@ def run_xgboost(
         subsample=0.9,
         colsample_bytree=0.9,
         random_state=random_state,
-        n_jobs=-1,
+        n_jobs=1,  # avoid OpenMP conflict with PyTorch on macOS
     )
     model.fit(X, y)
     ult = predict_ultimate_per_origin(enrich_triangle_features(triangle_df), model.predict)

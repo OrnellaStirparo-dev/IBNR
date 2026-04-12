@@ -4,6 +4,70 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 
+
+def plot_uncertainty_bands(
+    accident_years: list[int],
+    point_estimates: dict[str, pd.Series],
+    uq_results: dict[str, tuple[pd.Series, pd.Series, pd.Series, pd.Series]],
+) -> None:
+    """
+    Plot ultimate estimates with 90% credible / predictive intervals.
+
+    Parameters
+    ----------
+    accident_years  : list of accident years (x-axis)
+    point_estimates : {model_name: ult_mean} — point estimates for all models
+    uq_results      : {model_name: (ult_mean, ult_std, ult_q05, ult_q95)}
+                      Models that have uncertainty intervals (Bayesian CL,
+                      MC-dropout neural nets).
+    """
+    n_uq = len(uq_results)
+    if n_uq == 0:
+        return
+
+    cols = min(n_uq, 2)
+    rows = (n_uq + 1) // 2
+    fig, axes = plt.subplots(rows, cols, figsize=(7 * cols, 4 * rows), squeeze=False)
+    fig.suptitle(
+        "Predictive Distributions — 90% Credible / Predictive Intervals",
+        fontsize=14,
+        fontweight="bold",
+    )
+
+    for idx, (name, (mean_s, std_s, q05_s, q95_s)) in enumerate(uq_results.items()):
+        ax = axes[idx // cols][idx % cols]
+        years = sorted(
+            set(accident_years)
+            & set(mean_s.dropna().index.astype(int))
+        )
+        x = np.arange(len(years))
+        mu = mean_s.reindex(years).values
+        lo = q05_s.reindex(years).values
+        hi = q95_s.reindex(years).values
+
+        ax.fill_between(x, lo, hi, alpha=0.25, color="steelblue", label="90% interval")
+        ax.plot(x, mu, "o-", color="steelblue", linewidth=2, label=f"{name} mean")
+
+        # Overlay chain ladder for comparison if available
+        if "Chain Ladder" in point_estimates:
+            cl = point_estimates["Chain Ladder"].reindex(years).values
+            ax.plot(x, cl, "k--", linewidth=1.2, alpha=0.6, label="Chain Ladder")
+
+        ax.set_title(name, fontsize=12)
+        ax.set_xlabel("Accident Year")
+        ax.set_ylabel("Ultimate Claims")
+        ax.set_xticks(x)
+        ax.set_xticklabels(years, rotation=45)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    # Hide any empty subplots
+    for idx in range(n_uq, rows * cols):
+        axes[idx // cols][idx % cols].set_visible(False)
+
+    plt.tight_layout()
+    plt.show()
+
 def plot_model_comparison_metrics(comparison_df: pd.DataFrame):
     """
     Plot comparison metrics (MAE, RMSE, MAPE) for all models.

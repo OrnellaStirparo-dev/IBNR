@@ -6,8 +6,13 @@ scikit-learn>=1.4
 openpyxl>=3.1
 jupyter
 
-# ML / AI (tabular — current strong baselines)
+# Tier 2 — tabular ML (gradient boosting)
 xgboost>=2.0
 lightgbm>=4.3
 catboost>=1.2
+
+# Tier 2 — SHAP feature attribution for tree models
+shap>=0.45
+
+# Tier 3 — deep AI (neural networks with MC-dropout UQ)
 torch>=2.2

@@ -28,6 +28,7 @@ def run_lightgbm(
         subsample=0.9,
         colsample_bytree=0.9,
         random_state=random_state,
+        n_jobs=1,  # avoid OpenMP conflict with PyTorch on macOS
         verbose=-1,
     )
     model.fit(X, y)
