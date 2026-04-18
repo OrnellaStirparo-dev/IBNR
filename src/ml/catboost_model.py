@@ -1,4 +1,4 @@
-"""CatBoost — strong default for heterogeneous tabular features (Yandex, 2024+)."""
+"""CatBoost gradient boosting on triangle features."""
 
 from __future__ import annotations
 
@@ -10,15 +10,22 @@ from src.ml.features import enrich_triangle_features, matrix_xy, predict_ultimat
 
 def run_catboost(
     triangle_df: pd.DataFrame,
-    target: str = "cumulative_claims",
     iterations: int = 400,
     learning_rate: float = 0.05,
     random_state: int = 42,
 ) -> tuple[CatBoostRegressor, pd.Series]:
+    """
+    Fit CatBoost on enriched triangle features and return (model, ultimates).
+
+    Hyperparameters
+    ---------------
+    iterations=400, lr=0.05, depth=6
+        Matches the XGBoost / LightGBM budget for a fair comparison.
+    """
     enr = enrich_triangle_features(triangle_df)
     X, y = matrix_xy(enr)
     if len(X) < 8:
-        raise ValueError("Not enough triangle cells to train CatBoost (need at least 8 observed points).")
+        raise ValueError("Need ≥ 8 observed triangle cells to train CatBoost.")
 
     model = CatBoostRegressor(
         iterations=iterations,

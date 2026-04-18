@@ -37,7 +37,6 @@ from src.ai.bayesian_chainladder import run_bayesian_chainladder
 from src.ai.deep_residual_net import run_deep_residual_net
 from src.ai.gru_triangle import run_gru_triangle
 from src.ai.hybrid_models import (
-    multi_average,
     run_credibility_hybrid,
     run_hybrid_cl_bf_dl,
     run_hybrid_cl_deepresnet,
@@ -68,21 +67,25 @@ from src.visualization.comparison import (
 from src.visualization.triangle_viz import plot_triangle
 
 
-def _run(label: str, fn, results: dict) -> None:
+_SEP = "=" * 70
+
+
+def _run(label: str, fn: callable, results: dict[str, pd.Series | None]) -> None:
+    """Run *fn*, store the result in *results[label]*, and print it."""
     print(f"\n  {label}...")
     try:
         s = fn()
         results[label] = s
         print(f"  {s.to_string()}")
-    except Exception as e:
-        print(f"  ❌  {e}")
+    except Exception as exc:
+        print(f"  ❌  {exc}")
         results[label] = None
 
 
 def main() -> None:
-    print("=" * 70)
+    print(_SEP)
     print("IBNR  —  Traditional · Bayesian · Tabular ML · Deep AI · Hybrids")
-    print("=" * 70)
+    print(_SEP)
 
     # ------------------------------------------------------------------ #
     # Data                                                                #
@@ -104,9 +107,9 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # TIER 1 — Traditional                                                #
     # ------------------------------------------------------------------ #
-    print("\n" + "=" * 70)
+    print(f"\n{_SEP}")
     print("TIER 1 — TRADITIONAL ACTUARIAL")
-    print("=" * 70)
+    print(_SEP)
 
     for name, fn in [
         ("Chain Ladder", run_chainladder),
@@ -122,11 +125,11 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # TIER 1+ — Bayesian Chain Ladder                                     #
     # ------------------------------------------------------------------ #
-    print("\n" + "=" * 70)
+    print(f"\n{_SEP}")
     print("TIER 1+  — BAYESIAN CHAIN LADDER")
     print("  Conjugate log-Normal posterior on development factors.")
     print("  Full predictive distribution via 5,000 Monte Carlo draws.")
-    print("=" * 70)
+    print(_SEP)
 
     uq_results: dict[str, tuple[pd.Series, pd.Series, pd.Series, pd.Series]] = {}
 
@@ -149,9 +152,9 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # TIER 2 — Tabular ML (gradient boosting) + SHAP                     #
     # ------------------------------------------------------------------ #
-    print("\n" + "=" * 70)
+    print(f"\n{_SEP}")
     print("TIER 2 — TABULAR ML  (gradient boosting + SHAP attribution)")
-    print("=" * 70)
+    print(_SEP)
 
     fitted_boosting: dict[str, object] = {}
     u_xgb: pd.Series | None = None
@@ -188,14 +191,14 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # TIER 3 — Deep AI  (MC-dropout UQ)                                  #
     # ------------------------------------------------------------------ #
-    print("\n" + "=" * 70)
+    print(f"\n{_SEP}")
     print("TIER 3 — DEEP AI  (neural networks · MC-dropout uncertainty)")
     print("  MC-dropout: dropout active during 150 stochastic inference passes.")
     print("  Predictive std used for credibility weighting in Tier 4.")
-    print("=" * 70)
+    print(_SEP)
 
     u_mlp = u_deep = u_gru = u_trf = None
-    u_mlp_std = u_deep_std = u_gru_std = u_trf_std = None
+    u_deep_std = u_gru_std = u_trf_std = None
 
     for name, run_fn, ult_key in [
         ("MLP",          run_pytorch_mlp,       "mlp"),
@@ -209,7 +212,7 @@ def main() -> None:
             model_results[name] = ult_mean
             uq_results[name] = (ult_mean, ult_std, ult_mean - 1.645 * ult_std, ult_mean + 1.645 * ult_std)
             if ult_key == "mlp":
-                u_mlp, u_mlp_std = ult_mean, ult_std
+                u_mlp = ult_mean
             elif ult_key == "deep":
                 u_deep, u_deep_std = ult_mean, ult_std
             elif ult_key == "gru":
@@ -230,9 +233,9 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # TIER 4 — Hybrids                                                   #
     # ------------------------------------------------------------------ #
-    print("\n" + "=" * 70)
+    print(f"\n{_SEP}")
     print("TIER 4 — HYBRID / ENSEMBLE")
-    print("=" * 70)
+    print(_SEP)
 
     # Fixed convex blends (traditional style)
     if u_cl is not None and u_deep is not None:
@@ -274,9 +277,9 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # Summary & metrics                                                   #
     # ------------------------------------------------------------------ #
-    print("\n" + "=" * 70)
+    print(f"\n{_SEP}")
     print("SUMMARY & METRICS")
-    print("=" * 70)
+    print(_SEP)
 
     summary_df = create_model_summary(triangle_df, model_results)
     print("\n", summary_df.to_string())

@@ -11,5 +11,11 @@ from src.traditional.chain_ladder_manual import cumulative_pivot_from_long, ulti
 
 
 def run_mack_chainladder(triangle_df: pd.DataFrame) -> pd.Series:
+    """
+    Return Mack chain-ladder ultimates per accident year.
+
+    Mean ultimates coincide with ordinary chain ladder; the Mack framework
+    adds process-variance estimates (not exposed here — use for point comparison).
+    """
     pivot = cumulative_pivot_from_long(triangle_df)
     return ultimate_from_pivot(pivot)

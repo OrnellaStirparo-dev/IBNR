@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
 import numpy as np
-from typing import Optional
+import pandas as pd
+import seaborn as sns
 
 
 def plot_uncertainty_bands(
@@ -68,7 +69,7 @@ def plot_uncertainty_bands(
     plt.tight_layout()
     plt.show()
 
-def plot_model_comparison_metrics(comparison_df: pd.DataFrame):
+def plot_model_comparison_metrics(comparison_df: pd.DataFrame) -> None:
     """
     Plot comparison metrics (MAE, RMSE, MAPE) for all models.
     
@@ -109,7 +110,7 @@ def plot_model_comparison_metrics(comparison_df: pd.DataFrame):
     plt.show()
 
 
-def plot_ultimate_claims_comparison(summary_df: pd.DataFrame):
+def plot_ultimate_claims_comparison(summary_df: pd.DataFrame) -> None:
     """
     Plot ultimate claims estimates from all models by accident year.
     
@@ -182,7 +183,7 @@ def plot_ultimate_claims_comparison(summary_df: pd.DataFrame):
     plt.show()
 
 
-def plot_ibnr_comparison(summary_df: pd.DataFrame):
+def plot_ibnr_comparison(summary_df: pd.DataFrame) -> None:
     """
     Plot IBNR reserves by accident year for all models.
     
@@ -219,17 +220,12 @@ def plot_ibnr_comparison(summary_df: pd.DataFrame):
     plt.show()
 
 
-def plot_triangle_with_predictions(triangle_df: pd.DataFrame, 
-                                   model_name: str,
-                                   predictions: Optional[pd.Series] = None):
-    """
-    Plot the triangle heatmap with model predictions overlaid.
-    
-    Args:
-        triangle_df: Original triangle DataFrame
-        model_name: Name of the model
-        predictions: Optional predictions to overlay
-    """
+def plot_triangle_with_predictions(
+    triangle_df: pd.DataFrame,
+    model_name: str,
+    predictions: pd.Series | None = None,
+) -> None:
+    """Plot the triangle heatmap with an optional model-predictions overlay."""
     pivot = triangle_df.pivot(index="accident_year", columns="development_year", values="cumulative_claims")
     
     fig, ax = plt.subplots(figsize=(12, 8))

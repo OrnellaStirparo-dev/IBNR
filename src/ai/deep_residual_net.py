@@ -64,18 +64,6 @@ class DeepResidualTabular(nn.Module):
         return self.head(h).squeeze(-1)
 
 
-def _make_predict_fn(
-    model: DeepResidualTabular, x_scaler: StandardScaler, y_scaler: StandardScaler
-):
-    """Return a predict function compatible with predict_ultimate_per_origin."""
-    def _predict(df: pd.DataFrame) -> np.ndarray:
-        Xp = x_scaler.transform(df)
-        with torch.no_grad():
-            out = model(torch.tensor(Xp, dtype=torch.float32)).numpy()
-        return y_scaler.inverse_transform(out.reshape(-1, 1)).ravel()
-    return _predict
-
-
 def run_deep_residual_net(
     triangle_df: pd.DataFrame,
     epochs: int = 350,
@@ -129,7 +117,12 @@ def run_deep_residual_net(
 
     # ----- MC-dropout inference -----
     enr_full = enrich_triangle_features(triangle_df)
-    predict_fn = _make_predict_fn(model, x_scaler, y_scaler)
+
+    def predict_fn(df: pd.DataFrame) -> np.ndarray:
+        Xp = x_scaler.transform(df)
+        with torch.no_grad():
+            out = model(torch.tensor(Xp, dtype=torch.float32)).numpy()
+        return y_scaler.inverse_transform(out.reshape(-1, 1)).ravel()
 
     model.train()  # keep dropout active
     mc_runs: list[pd.Series] = []

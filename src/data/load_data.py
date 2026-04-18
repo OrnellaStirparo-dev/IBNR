@@ -77,10 +77,12 @@ def load_siniestros_data(filepath: str, sheet_name: int | str = 0) -> pd.DataFra
             raise ValueError(f"Failed to read Excel file {filepath}: {e}\n"
                            f"Available sheets: {available_sheets}\n"
                            f"File size: {file_size} bytes")
-        except:
-            raise ValueError(f"Failed to read Excel file {filepath}: {e}\n"
-                           f"File size: {file_size} bytes\n"
-                           f"Please ensure the file is a valid Excel file (.xlsx or .xls).")
+        except Exception:
+            raise ValueError(
+                f"Failed to read Excel file {filepath}: {e}\n"
+                f"File size: {file_size} bytes\n"
+                "Please ensure the file is a valid Excel file (.xlsx or .xls)."
+            )
 
 
 def load_claims_triangle(sheet_name: int | str = 0) -> pd.DataFrame:

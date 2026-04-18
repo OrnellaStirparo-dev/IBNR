@@ -8,5 +8,6 @@ from src.traditional.chain_ladder_manual import cumulative_pivot_from_long, ulti
 
 
 def run_chainladder(triangle_df: pd.DataFrame) -> pd.Series:
+    """Return chain-ladder ultimates per accident year."""
     pivot = cumulative_pivot_from_long(triangle_df)
     return ultimate_from_pivot(pivot)

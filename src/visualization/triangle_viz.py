@@ -1,16 +1,17 @@
-import matplotlib.pyplot as plt
-import seaborn as sns
-import pandas as pd
+from __future__ import annotations
 
-def plot_triangle(df: pd.DataFrame, value_col: str = "cumulative_claims"):
-    """
-    Visualize the claims triangle as a heatmap.
-    """
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+
+def plot_triangle(df: pd.DataFrame, value_col: str = "cumulative_claims") -> None:
+    """Render the cumulative claims triangle as an annotated heatmap."""
     pivot = df.pivot(index="accident_year", columns="development_year", values=value_col)
-    
-    plt.figure(figsize=(8,6))
-    sns.heatmap(pivot, annot=True, fmt=".0f", cmap="Blues")
-    plt.title("Claims Triangle Heatmap")
+    plt.figure(figsize=(9, 6))
+    sns.heatmap(pivot, annot=True, fmt=".0f", cmap="Blues", linewidths=0.4)
+    plt.title("Cumulative Claims Triangle", fontsize=14, fontweight="bold")
     plt.ylabel("Accident Year")
     plt.xlabel("Development Year")
+    plt.tight_layout()
     plt.show()
