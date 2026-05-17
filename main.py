@@ -1,61 +1,42 @@
 """
-IBNR comparison: traditional actuarial methods · tabular ML · deep AI · Bayesian · hybrids.
+IBNR reserving: comparación de métodos tradicionales vs. Inteligencia Artificial.
 
-Architecture of this experiment
---------------------------------
-Tier 1 — Traditional (rule-based actuarial)
-    Chain Ladder, Mack, Bornhuetter-Ferguson, Cape Cod
+Modelos incluidos
+-----------------
+Tradicionales (Sección 2 de la tesis):
+    Chain Ladder, Bornhuetter-Ferguson, Mack Chain Ladder
 
-Tier 1+ — Bayesian extension of traditional
-    Bayesian Chain Ladder: conjugate log-Normal posterior on development factors,
-    full predictive distribution via Monte Carlo draws.
+Inteligencia Artificial (Sección 3):
+    GRU / DeepTriangle (Kuo 2019)
+    Transformer (Vaswani et al. 2017 / Richman & Wüthrich 2026)
+    Ambos con cuantificación de incertidumbre via MC-Dropout (Gal & Ghahramani 2016).
 
-Tier 2 — Tabular ML (gradient boosting, feature-engineered)
-    XGBoost, LightGBM, CatBoost  +  SHAP feature attribution
+Híbrido (Sección 4):
+    Credibility Hybrid — Bühlmann-style ensemble de GRU y Transformer
+    ponderado por inversa de desviación MC-Dropout, con Chain Ladder como ancla.
 
-Tier 3 — Sequential / deep AI (representation learning, no hand-crafted features)
-    MLP, Deep ResNet (tabular), GRU development path, Transformer (dev tokens)
-    All include MC-dropout uncertainty quantification.
-
-Tier 4 — Hybrid / ensemble
-    Fixed convex blends (CL + AI)
-    Credibility hybrid: Bühlmann-style weighting by inverse MC-dropout std
+Datos:
+    Triángulo sintético calibrado a parámetros reales de la SSN
+    (frecuencia, inflación, mix de siniestros, período 2003–2022).
 """
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
-# Must be set before PyTorch/XGBoost/LightGBM are imported — prevents the
-# OpenMP duplicate-library segfault on macOS (each ships its own libomp).
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 import pandas as pd
 
-from src.ai.bayesian_chainladder import run_bayesian_chainladder
-from src.ai.deep_residual_net import run_deep_residual_net
 from src.ai.gru_triangle import run_gru_triangle
-from src.ai.hybrid_models import (
-    run_credibility_hybrid,
-    run_hybrid_cl_bf_dl,
-    run_hybrid_cl_deepresnet,
-    run_hybrid_cl_gru,
-    run_hybrid_cl_transformer,
-    run_hybrid_cl_xgboost,
-)
-from src.ai.pytorch_mlp import run_pytorch_mlp
+from src.ai.hybrid_models import run_credibility_hybrid, run_hybrid_cl_transformer
 from src.ai.transformer_triangle import run_transformer_triangle
 from src.data.load_data import load_claims_triangle
 from src.data.transformer import clean_siniestros_data, create_claims_triangle
 from src.evaluation.comparison import compare_models_results, create_model_summary
-from src.ml.catboost_model import run_catboost
-from src.ml.features import enrich_triangle_features, matrix_xy
-from src.ml.lightgbm_model import run_lightgbm
-from src.ml.shap_explainer import explain_all_boosting
-from src.ml.xgboost_model import run_xgboost
 from src.traditional.bf_model import run_bornhuetter_ferguson
-from src.traditional.cape_cod_model import run_cape_cod
 from src.traditional.chainladder_model import run_chainladder
 from src.traditional.mack_model import run_mack_chainladder
 from src.visualization.comparison import (
@@ -66,260 +47,192 @@ from src.visualization.comparison import (
 )
 from src.visualization.triangle_viz import plot_triangle
 
-
 _SEP = "=" * 70
+_MODELS_ORDER = [
+    "Chain Ladder",
+    "Bornhuetter-Ferguson",
+    "Mack Chain Ladder",
+    "GRU",
+    "Transformer",
+    "Credibility Hybrid",
+]
 
 
-def _run(label: str, fn: callable, results: dict[str, pd.Series | None]) -> None:
-    """Run *fn*, store the result in *results[label]*, and print it."""
-    print(f"\n  {label}...")
-    try:
-        s = fn()
-        results[label] = s
-        print(f"  {s.to_string()}")
-    except Exception as exc:
-        print(f"  ❌  {exc}")
-        results[label] = None
+def _header(title: str) -> None:
+    print(f"\n{_SEP}\n{title}\n{_SEP}")
 
 
 def main() -> None:
     print(_SEP)
-    print("IBNR  —  Traditional · Bayesian · Tabular ML · Deep AI · Hybrids")
+    print("IBNR  —  Tradicionales · GRU · Transformer · Híbrido (Credibilidad)")
     print(_SEP)
 
     # ------------------------------------------------------------------ #
-    # Data                                                                #
+    # Datos                                                                #
     # ------------------------------------------------------------------ #
-    print("\n  Loading raw Excel from data/raw (or IBNR_RAW_XLSX)...")
+    print("\nCargando datos...")
     raw_df = load_claims_triangle()
-    print(f"  Shape: {raw_df.shape};  columns: {raw_df.columns.tolist()}")
-
-    print("\n  Cleaning...")
     cleaned_df = clean_siniestros_data(raw_df)
 
-    print("\n  Building cumulative triangle...")
+    print("\nConstruyendo triángulo acumulado...")
     triangle_df = create_claims_triangle(cleaned_df)
-    print(triangle_df.head(12).to_string())
-    print(f"  Cells: {len(triangle_df)}")
+
+    pivot = triangle_df.pivot(
+        index="accident_year", columns="development_year", values="cumulative_claims"
+    )
+    print("\nTriángulo (millones ARS):")
+    print((pivot / 1e6).round(2).to_string())
 
     model_results: dict[str, pd.Series | None] = {}
-
-    # ------------------------------------------------------------------ #
-    # TIER 1 — Traditional                                                #
-    # ------------------------------------------------------------------ #
-    print(f"\n{_SEP}")
-    print("TIER 1 — TRADITIONAL ACTUARIAL")
-    print(_SEP)
-
-    for name, fn in [
-        ("Chain Ladder", run_chainladder),
-        ("Mack Chain Ladder", run_mack_chainladder),
-        ("Bornhuetter-Ferguson", run_bornhuetter_ferguson),
-        ("Cape Cod", run_cape_cod),
-    ]:
-        _run(name, lambda f=fn: f(triangle_df), model_results)
-
-    u_cl = model_results.get("Chain Ladder")
-    u_bf = model_results.get("Bornhuetter-Ferguson")
-
-    # ------------------------------------------------------------------ #
-    # TIER 1+ — Bayesian Chain Ladder                                     #
-    # ------------------------------------------------------------------ #
-    print(f"\n{_SEP}")
-    print("TIER 1+  — BAYESIAN CHAIN LADDER")
-    print("  Conjugate log-Normal posterior on development factors.")
-    print("  Full predictive distribution via 5,000 Monte Carlo draws.")
-    print(_SEP)
-
     uq_results: dict[str, tuple[pd.Series, pd.Series, pd.Series, pd.Series]] = {}
 
-    print("\n  Bayesian Chain Ladder...")
-    try:
-        bcl_mean, bcl_std, bcl_q05, bcl_q95 = run_bayesian_chainladder(triangle_df)
-        model_results["Bayesian CL"] = bcl_mean
-        uq_results["Bayesian CL"] = (bcl_mean, bcl_std, bcl_q05, bcl_q95)
-        print(f"  Posterior mean ultimate:\n{bcl_mean.to_string()}")
-        summary_uq = pd.DataFrame({
-            "mean": bcl_mean,
-            "std":  bcl_std,
-            "q05":  bcl_q05,
-            "q95":  bcl_q95,
-        })
-        print(f"\n  Credible interval (90%):\n{summary_uq.to_string()}")
-    except Exception as e:
-        print(f"  ❌  {e}")
-
     # ------------------------------------------------------------------ #
-    # TIER 2 — Tabular ML (gradient boosting) + SHAP                     #
+    # TRADICIONALES                                                        #
     # ------------------------------------------------------------------ #
-    print(f"\n{_SEP}")
-    print("TIER 2 — TABULAR ML  (gradient boosting + SHAP attribution)")
-    print(_SEP)
+    _header("TIER 1 — MÉTODOS TRADICIONALES")
 
-    fitted_boosting: dict[str, object] = {}
-    u_xgb: pd.Series | None = None
-
-    for name, run_fn, key in [
-        ("LightGBM", run_lightgbm, "lgbm"),
-        ("CatBoost", run_catboost, "cat"),
-        ("XGBoost",  run_xgboost,  "xgb"),
+    for name, fn in [
+        ("Chain Ladder",         lambda: run_chainladder(triangle_df)),
+        ("Bornhuetter-Ferguson", lambda: run_bornhuetter_ferguson(triangle_df)),
+        ("Mack Chain Ladder",    lambda: run_mack_chainladder(triangle_df)),
     ]:
         print(f"\n  {name}...")
         try:
-            fitted_model, ult = run_fn(triangle_df)
-            model_results[name] = ult
-            fitted_boosting[name] = fitted_model
-            if key == "xgb":
-                u_xgb = ult
-            print(ult.to_string())
-        except Exception as e:
-            print(f"  ❌  {e}")
+            result = fn()
+            model_results[name] = result
+            print(result.to_string())
+        except Exception as exc:
+            print(f"  ❌  {exc}")
             model_results[name] = None
 
-    # SHAP explanations on the shared training features
-    print("\n  SHAP feature attribution...")
-    try:
-        enr = enrich_triangle_features(triangle_df)
-        X_train, _ = matrix_xy(enr)
-        shap_results = explain_all_boosting(fitted_boosting, X_train, plot=True)
-        for name, imp_df in shap_results.items():
-            if len(imp_df) > 0:
-                print(f"\n  {name} — SHAP feature ranking:\n{imp_df.to_string(index=False)}")
-    except Exception as e:
-        print(f"  SHAP step failed: {e}")
+    u_cl = model_results.get("Chain Ladder")
 
     # ------------------------------------------------------------------ #
-    # TIER 3 — Deep AI  (MC-dropout UQ)                                  #
+    # INTELIGENCIA ARTIFICIAL                                              #
     # ------------------------------------------------------------------ #
-    print(f"\n{_SEP}")
-    print("TIER 3 — DEEP AI  (neural networks · MC-dropout uncertainty)")
-    print("  MC-dropout: dropout active during 150 stochastic inference passes.")
-    print("  Predictive std used for credibility weighting in Tier 4.")
-    print(_SEP)
+    _header("TIER 2 — INTELIGENCIA ARTIFICIAL  (MC-Dropout uncertainty)")
+    print("  150 pasadas estocásticas forward para cuantificación de incertidumbre.\n")
 
-    u_mlp = u_deep = u_gru = u_trf = None
-    u_deep_std = u_gru_std = u_trf_std = None
+    u_gru = u_gru_std = u_trf = u_trf_std = None
 
-    for name, run_fn, ult_key in [
-        ("MLP",          run_pytorch_mlp,       "mlp"),
-        ("Deep ResNet",  run_deep_residual_net,  "deep"),
-        ("GRU",          run_gru_triangle,       "gru"),
-        ("Transformer",  run_transformer_triangle, "trf"),
+    for name, run_fn, key in [
+        ("GRU",         run_gru_triangle,       "gru"),
+        ("Transformer", run_transformer_triangle, "trf"),
     ]:
         print(f"\n  {name}...")
         try:
             *_, ult_mean, ult_std = run_fn(triangle_df)
             model_results[name] = ult_mean
-            uq_results[name] = (ult_mean, ult_std, ult_mean - 1.645 * ult_std, ult_mean + 1.645 * ult_std)
-            if ult_key == "mlp":
-                u_mlp = ult_mean
-            elif ult_key == "deep":
-                u_deep, u_deep_std = ult_mean, ult_std
-            elif ult_key == "gru":
+            uq_results[name] = (
+                ult_mean, ult_std,
+                ult_mean - 1.645 * ult_std,
+                ult_mean + 1.645 * ult_std,
+            )
+            if key == "gru":
                 u_gru, u_gru_std = ult_mean, ult_std
-            elif ult_key == "trf":
+            else:
                 u_trf, u_trf_std = ult_mean, ult_std
+
             ci_df = pd.DataFrame({
-                "mean": ult_mean,
-                "std": ult_std,
-                "q05 (approx)": ult_mean - 1.645 * ult_std,
-                "q95 (approx)": ult_mean + 1.645 * ult_std,
+                "ultimate (media)":   ult_mean,
+                "std (MC-Dropout)":   ult_std,
+                "IC 90% inferior":    ult_mean - 1.645 * ult_std,
+                "IC 90% superior":    ult_mean + 1.645 * ult_std,
             })
             print(ci_df.to_string())
-        except Exception as e:
-            print(f"  ❌  {e}")
+        except Exception as exc:
+            print(f"  ❌  {exc}")
             model_results[name] = None
 
     # ------------------------------------------------------------------ #
-    # TIER 4 — Hybrids                                                   #
+    # HÍBRIDO — Credibility Hybrid (Bühlmann)                             #
     # ------------------------------------------------------------------ #
-    print(f"\n{_SEP}")
-    print("TIER 4 — HYBRID / ENSEMBLE")
-    print(_SEP)
+    _header("TIER 3 — HÍBRIDO  (Credibilidad Bühlmann)")
+    print("  Ensemble GRU + Transformer ponderado por 1/sigma MC-Dropout.")
+    print("  Chain Ladder como ancla con peso fijo 20%.\n")
 
-    # Fixed convex blends (traditional style)
-    if u_cl is not None and u_deep is not None:
-        _run("Hybrid CL+DeepResNet (50/50)", lambda: run_hybrid_cl_deepresnet(u_cl, u_deep, 0.5), model_results)
-    if u_cl is not None and u_gru is not None:
-        _run("Hybrid CL+GRU (50/50)", lambda: run_hybrid_cl_gru(u_cl, u_gru, 0.5), model_results)
-    if u_cl is not None and u_trf is not None:
-        _run("Hybrid CL+Transformer (50/50)", lambda: run_hybrid_cl_transformer(u_cl, u_trf, 0.5), model_results)
-    if u_cl is not None and u_xgb is not None:
-        _run("Hybrid CL+XGBoost (50/50)", lambda: run_hybrid_cl_xgboost(u_cl, u_xgb, 0.5), model_results)
-    if u_cl is not None and u_bf is not None and u_deep is not None:
-        _run(
-            "Hybrid CL+BF+DeepResNet (35/25/40)",
-            lambda: run_hybrid_cl_bf_dl(u_cl, u_bf, u_deep, w_cl=0.35, w_bf=0.25),
-            model_results,
-        )
-
-    # Credibility hybrid — Bühlmann-style weighting by inverse MC-dropout std
     ai_candidates: dict[str, tuple[pd.Series, pd.Series]] = {}
-    if u_deep is not None and u_deep_std is not None:
-        ai_candidates["Deep ResNet"] = (u_deep, u_deep_std)
     if u_gru is not None and u_gru_std is not None:
         ai_candidates["GRU"] = (u_gru, u_gru_std)
     if u_trf is not None and u_trf_std is not None:
         ai_candidates["Transformer"] = (u_trf, u_trf_std)
 
-    if ai_candidates:
-        print("\n  Credibility Hybrid (uncertainty-weighted, CL anchor 20%)...")
+    if ai_candidates and u_cl is not None:
         try:
             cred_ult = run_credibility_hybrid(
                 ai_candidates, anchor=u_cl, anchor_weight=0.20
             )
             model_results["Credibility Hybrid"] = cred_ult
             print(cred_ult.to_string())
-        except Exception as e:
-            print(f"  ❌  {e}")
+        except Exception as exc:
+            print(f"  ❌  {exc}")
             model_results["Credibility Hybrid"] = None
 
     # ------------------------------------------------------------------ #
-    # Summary & metrics                                                   #
+    # Resumen y métricas                                                   #
     # ------------------------------------------------------------------ #
-    print(f"\n{_SEP}")
-    print("SUMMARY & METRICS")
-    print(_SEP)
-
-    summary_df = create_model_summary(triangle_df, model_results)
-    print("\n", summary_df.to_string())
+    _header("RESUMEN Y MÉTRICAS")
 
     results_valid = {k: v for k, v in model_results.items() if v is not None}
+
+    summary_df = create_model_summary(triangle_df, results_valid)
+    print("\n", summary_df.to_string())
+
     comparison_df = compare_models_results(results_valid, triangle_df)
-    if len(comparison_df) > 0:
-        print("\n", comparison_df.to_string())
+    if comparison_df is not None and len(comparison_df) > 0:
+        # Reorder rows to match thesis presentation order
+        order = {m: i for i, m in enumerate(_MODELS_ORDER)}
+        comparison_df["_order"] = comparison_df["model"].map(order).fillna(99)
+        comparison_df = comparison_df.sort_values("_order").drop(columns="_order")
+        print("\n", comparison_df[["model", "mae", "rmse", "mape", "r2"]].to_string(index=False))
 
     # ------------------------------------------------------------------ #
-    # Visualisation                                                       #
+    # Visualizaciones                                                      #
     # ------------------------------------------------------------------ #
-    print("\n  Plots (close windows to continue)...")
+    fig_dir = Path(__file__).parent / "figures"
+    fig_dir.mkdir(exist_ok=True)
+    print(f"\n  Generando gráficos → {fig_dir}/")
 
     try:
-        plot_triangle(triangle_df)
-    except Exception as e:
-        print(f"  Triangle plot: {e}")
+        plot_triangle(triangle_df, save_path=str(fig_dir / "triangulo.png"))
+    except Exception as exc:
+        print(f"  triángulo: {exc}")
 
     try:
         if summary_df is not None and len(summary_df) > 0:
-            plot_ultimate_claims_comparison(summary_df)
-            plot_ibnr_comparison(summary_df)
-    except Exception as e:
-        print(f"  Summary plots: {e}")
+            plot_ultimate_claims_comparison(
+                summary_df,
+                save_path=str(fig_dir / "ultimates_comparison.png"),
+            )
+            plot_ibnr_comparison(
+                summary_df,
+                save_path=str(fig_dir / "ibnr_comparison.png"),
+            )
+    except Exception as exc:
+        print(f"  comparación ultimates/IBNR: {exc}")
 
     try:
         if comparison_df is not None and len(comparison_df) > 0:
-            plot_model_comparison_metrics(comparison_df)
-    except Exception as e:
-        print(f"  Metrics plot: {e}")
+            plot_model_comparison_metrics(
+                comparison_df,
+                save_path=str(fig_dir / "metricas_modelos.png"),
+            )
+    except Exception as exc:
+        print(f"  métricas: {exc}")
 
     try:
         if uq_results:
             acc_years = sorted({int(x) for x in triangle_df["accident_year"].unique()})
-            plot_uncertainty_bands(acc_years, results_valid, uq_results)
-    except Exception as e:
-        print(f"  Uncertainty bands plot: {e}")
+            plot_uncertainty_bands(
+                acc_years,
+                results_valid,
+                uq_results,
+                save_path=str(fig_dir / "bandas_incertidumbre.png"),
+            )
+    except Exception as exc:
+        print(f"  bandas de incertidumbre: {exc}")
 
-    print("\nDone.")
+    print("\nListo.")
 
 
 if __name__ == "__main__":

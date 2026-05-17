@@ -10,6 +10,7 @@ def plot_uncertainty_bands(
     accident_years: list[int],
     point_estimates: dict[str, pd.Series],
     uq_results: dict[str, tuple[pd.Series, pd.Series, pd.Series, pd.Series]],
+    save_path: str | None = None,
 ) -> None:
     """
     Plot ultimate estimates with 90% credible / predictive intervals.
@@ -67,9 +68,12 @@ def plot_uncertainty_bands(
         axes[idx // cols][idx % cols].set_visible(False)
 
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
+    plt.close()
 
-def plot_model_comparison_metrics(comparison_df: pd.DataFrame) -> None:
+def plot_model_comparison_metrics(comparison_df: pd.DataFrame, save_path: str | None = None) -> None:
     """
     Plot comparison metrics (MAE, RMSE, MAPE) for all models.
     
@@ -107,10 +111,13 @@ def plot_model_comparison_metrics(comparison_df: pd.DataFrame) -> None:
             ax.set_title(title, fontsize=12)
     
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
+    plt.close()
 
 
-def plot_ultimate_claims_comparison(summary_df: pd.DataFrame) -> None:
+def plot_ultimate_claims_comparison(summary_df: pd.DataFrame, save_path: str | None = None) -> None:
     """
     Plot ultimate claims estimates from all models by accident year.
     
@@ -178,12 +185,15 @@ def plot_ultimate_claims_comparison(summary_df: pd.DataFrame) -> None:
     ax2.set_xticklabels(labels, rotation=45, ha='right')
     ax2.legend()
     ax2.grid(True, alpha=0.3, axis='y')
-    
+
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
+    plt.close()
 
 
-def plot_ibnr_comparison(summary_df: pd.DataFrame) -> None:
+def plot_ibnr_comparison(summary_df: pd.DataFrame, save_path: str | None = None) -> None:
     """
     Plot IBNR reserves by accident year for all models.
     
@@ -215,9 +225,12 @@ def plot_ibnr_comparison(summary_df: pd.DataFrame) -> None:
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3, axis='y')
     ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
-    
+
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
+    plt.close()
 
 
 def plot_triangle_with_predictions(

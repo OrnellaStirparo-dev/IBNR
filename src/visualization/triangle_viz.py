@@ -5,7 +5,11 @@ import pandas as pd
 import seaborn as sns
 
 
-def plot_triangle(df: pd.DataFrame, value_col: str = "cumulative_claims") -> None:
+def plot_triangle(
+    df: pd.DataFrame,
+    value_col: str = "cumulative_claims",
+    save_path: str | None = None,
+) -> None:
     """Render the cumulative claims triangle as an annotated heatmap."""
     pivot = df.pivot(index="accident_year", columns="development_year", values=value_col)
     plt.figure(figsize=(9, 6))
@@ -14,4 +18,7 @@ def plot_triangle(df: pd.DataFrame, value_col: str = "cumulative_claims") -> Non
     plt.ylabel("Accident Year")
     plt.xlabel("Development Year")
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
+    plt.close()
