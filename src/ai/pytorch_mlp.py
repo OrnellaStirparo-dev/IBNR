@@ -1,9 +1,27 @@
 """
-Compact feedforward MLP — entry-level neural network baseline for IBNR.
+Feedforward MLP over the development triangle (Sección 3.2).
 
-Simpler than the deep residual net but still a genuine neural network:
-learned feature interactions that tabular boosting cannot represent.
-Includes MC-dropout uncertainty quantification.
+The network is fitted on the **log development factor** ``log(C_j / C_{j-1})``
+rather than on the cumulative itself, and the projection to the ultimate is a
+multiplicative roll-forward. Both choices matter here:
+
+- The cumulative on this triangle spans three orders of magnitude, because
+  twenty years of inflation sit inside it. A network fitted on standardised
+  levels spends its capacity on scale rather than on development, and an
+  autoregressive projection on levels compounds that error every period.
+- Predicting a factor recovers the chain-ladder structure exactly when the data
+  are multiplicative, so the MLP generalises the classical method instead of
+  competing with it from scratch — which is the claim Section 3.2 makes.
+
+The MLP still treats each cell as an independent observation: it has no
+mechanism for the serial dependence along an accident year, which is the
+limitation that motivates the recurrent model in Section 3.3.
+
+Uncertainty is MC-dropout (Gal & Ghahramani, 2016): dropout stays active at
+inference and each stochastic pass produces a full roll-forward, so the spread
+reflects uncertainty compounded along the projection. It is epistemic
+uncertainty about the fitted function only — not comparable to Mack's MSEP,
+which also carries process variance.
 """
 
 from __future__ import annotations
@@ -14,20 +32,42 @@ import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 
-from src.ml.features import enrich_triangle_features, matrix_xy, predict_ultimate_per_origin
+from src.data.features import matrix_xy_logratio, rollforward_logratio
 
 
 class _MLP(nn.Module):
-    def __init__(self, n_in: int, p_drop: float = 0.15) -> None:
+    """
+    Feedforward network over ``(development period, accident year)``, the
+    standard formulation for a cell-wise neural reserving model (Wüthrich, 2018).
+
+    A note on what this architecture can and cannot identify. The cells to be
+    predicted are precisely the recent accident years at late development
+    periods, and no cell of that kind has ever been observed — late development
+    is only seen for old accident years, recent accident years only early. The
+    accident-year effect therefore has to be extrapolated into a corner of the
+    plane with no data, and on a nominal triangle the effect the network has
+    learnt there is inflation. That is why the nominal fit overshoots by an order
+    of magnitude while the constant-currency fit is competitive: it is a property
+    of the data, not a defect of the training, and it is the argument for
+    embedding an actuarial structure (as CANN does) rather than leaving the model
+    free.
+
+    Making the two effects additive in log space does not fix it and makes it
+    worse: an additive offset scales every remaining development factor equally,
+    whereas a settlement slowdown shifts mass between periods. The interaction is
+    needed; what is missing is data to identify it.
+    """
+
+    def __init__(self, n_in: int, hidden: tuple[int, int] = (64, 32), p_drop: float = 0.15) -> None:
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(n_in, 64),
+            nn.Linear(n_in, hidden[0]),
             nn.ReLU(),
             nn.Dropout(p_drop),
-            nn.Linear(64, 32),
+            nn.Linear(hidden[0], hidden[1]),
             nn.ReLU(),
             nn.Dropout(p_drop),
-            nn.Linear(32, 1),
+            nn.Linear(hidden[1], 1),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -36,66 +76,56 @@ class _MLP(nn.Module):
 
 def run_pytorch_mlp(
     triangle_df: pd.DataFrame,
-    epochs: int = 200,
-    lr: float = 1e-3,
+    epochs: int = 1500,
+    lr: float = 3e-3,
+    weight_decay: float = 1e-4,
+    p_drop: float = 0.15,
     mc_samples: int = 150,
     random_state: int = 42,
 ) -> tuple[_MLP, StandardScaler, StandardScaler, pd.Series, pd.Series]:
     """
-    Fit MLP on triangle features and return ultimates with MC-dropout UQ.
-
-    Returns
-    -------
-    model, x_scaler, y_scaler, ult_mean (pd.Series), ult_std (pd.Series)
+    Fit the MLP and return ``(model, x_scaler, y_scaler, ult_mean, ult_std)``.
     """
     torch.manual_seed(random_state)
     np.random.seed(random_state)
 
-    enr = enrich_triangle_features(triangle_df)
-    X, y = matrix_xy(enr)
+    X, y = matrix_xy_logratio(triangle_df)
     if len(X) < 8:
-        raise ValueError(
-            "Not enough triangle cells to train the MLP (need ≥ 8 observed points)."
-        )
+        raise ValueError("Not enough observed cell pairs to train the MLP (need ≥ 8).")
 
-    x_scaler = StandardScaler()
-    y_scaler = StandardScaler()
-    Xn = x_scaler.fit_transform(X)
-    yn = y_scaler.fit_transform(y.values.reshape(-1, 1)).ravel()
+    x_scaler = StandardScaler().fit(X.values)
+    y_scaler = StandardScaler().fit(y.values.reshape(-1, 1))
 
-    Xt = torch.tensor(Xn, dtype=torch.float32)
-    yt = torch.tensor(yn, dtype=torch.float32)
+    Xt = torch.tensor(x_scaler.transform(X.values), dtype=torch.float32)
+    yt = torch.tensor(y_scaler.transform(y.values.reshape(-1, 1)).ravel(), dtype=torch.float32)
 
-    model = _MLP(X.shape[1])
-    opt = torch.optim.AdamW(model.parameters(), lr=lr)
+    model = _MLP(X.shape[1], p_drop=p_drop)
+    optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     loss_fn = nn.MSELoss()
 
     model.train()
     for _ in range(epochs):
-        opt.zero_grad()
+        optim.zero_grad()
         loss = loss_fn(model(Xt), yt)
         loss.backward()
-        opt.step()
+        optim.step()
 
-    # ----- MC-dropout inference -----
-    enr_full = enrich_triangle_features(triangle_df)
-
-    def _predict(df: pd.DataFrame) -> np.ndarray:
-        Xp = x_scaler.transform(df)
+    def _predict(features: pd.DataFrame) -> np.ndarray:
+        scaled = x_scaler.transform(features.values)
         with torch.no_grad():
-            out = model(torch.tensor(Xp, dtype=torch.float32)).numpy()
-        return y_scaler.inverse_transform(out.reshape(-1, 1)).ravel()
+            raw = model(torch.tensor(scaled, dtype=torch.float32)).numpy()
+        return y_scaler.inverse_transform(raw.reshape(-1, 1)).ravel()
 
-    model.train()
-    mc_runs: list[pd.Series] = [
-        predict_ultimate_per_origin(enr_full, _predict) for _ in range(mc_samples)
-    ]
+    model.train()  # dropout stays on for MC sampling
+    draws = [rollforward_logratio(triangle_df, _predict) for _ in range(mc_samples)]
     model.eval()
 
-    years = mc_runs[0].index.tolist()
-    mc_mat = np.column_stack([s.values for s in mc_runs])
-
-    ult_mean = pd.Series(np.nanmean(mc_mat, axis=1), index=years, name="MLP")
-    ult_std = pd.Series(np.nanstd(mc_mat, axis=1), index=years, name="mlp_std")
-
-    return model, x_scaler, y_scaler, ult_mean, ult_std
+    years = draws[0].index
+    matrix = np.column_stack([d.values for d in draws])
+    return (
+        model,
+        x_scaler,
+        y_scaler,
+        pd.Series(np.nanmean(matrix, axis=1), index=years, name="MLP"),
+        pd.Series(np.nanstd(matrix, axis=1), index=years, name="mlp_std"),
+    )

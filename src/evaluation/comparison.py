@@ -47,14 +47,40 @@ def _extract_ultimate(result: pd.Series | pd.DataFrame) -> pd.Series | None:
 def compare_models_results(
     results: dict[str, pd.Series | pd.DataFrame],
     triangle_df: pd.DataFrame,
+    true_ultimates: pd.Series | None = None,
 ) -> pd.DataFrame:
     """
     Build a per-model metrics table (MAE, RMSE, MAPE, R², total ultimate, total IBNR).
 
-    Metrics are computed against the latest observed diagonal as a proxy for
-    "actual" — appropriate for ranking model bias, not for absolute accuracy.
+    Scoring target
+    --------------
+    ``true_ultimates`` given
+        Errors are measured against the realised ultimate per accident year.
+        This is the only valid accuracy comparison, and it is available here
+        because the triangle is synthetic (see the ``ultimates_reales`` sheet
+        written by the generator).
+
+    ``true_ultimates`` omitted
+        Falls back to the latest observed diagonal. **This is not an accuracy
+        measure.** The diagonal is the paid-to-date, so the "error" it reports
+        is the reserve itself: a model that books zero IBNR scores a perfect
+        MAPE of 0 and an R² of 1. Use it only to read off bias, never to rank
+        models.
+
+    On top of the ultimate-level metrics, ``mae_ibnr`` and ``pct_error_ibnr``
+    report the error on the reserve, which is the quantity actually being
+    estimated and where the models genuinely differ.
     """
     latest_reported = _latest_reported_per_accident_year(triangle_df)
+
+    if true_ultimates is not None:
+        actual = true_ultimates.copy()
+        actual.index = [int(x) for x in actual.index]
+        scored_against = "true_ultimate"
+    else:
+        actual = latest_reported
+        scored_against = "latest_diagonal (BIASED — see docstring)"
+
     rows: list[dict] = []
 
     for model_name, result in results.items():
@@ -64,14 +90,26 @@ def compare_models_results(
         if ultimate is None:
             continue
 
-        common = latest_reported.index.intersection(ultimate.index)
+        common = actual.index.intersection(ultimate.index)
         if len(common) == 0:
             continue
 
-        metrics = calculate_metrics(latest_reported[common], ultimate[common])
+        metrics = calculate_metrics(actual[common], ultimate[common])
         metrics["model"] = model_name
+        metrics["scored_against"] = scored_against
         metrics["total_ultimate"] = float(ultimate.sum())
-        metrics["total_ibnr"] = float((ultimate - latest_reported.reindex(ultimate.index)).sum())
+
+        ibnr_hat = ultimate - latest_reported.reindex(ultimate.index)
+        metrics["total_ibnr"] = float(ibnr_hat.sum())
+
+        if true_ultimates is not None:
+            ibnr_true = actual[common] - latest_reported.reindex(common)
+            metrics["mae_ibnr"] = float(np.mean(np.abs(ibnr_hat[common] - ibnr_true)))
+            denom = float(ibnr_true.sum())
+            metrics["pct_error_ibnr"] = (
+                100.0 * (float(ibnr_hat[common].sum()) - denom) / denom if denom else np.nan
+            )
+
         rows.append(metrics)
 
     return pd.DataFrame(rows)
@@ -104,7 +142,7 @@ def create_model_summary(
             elif len(ultimate) == len(accident_years):
                 summary[model_name] = ultimate.values
         except Exception as exc:
-            print(f"⚠️  Could not extract ultimate for {model_name}: {exc}")
+            print(f"Could not extract ultimate for {model_name}: {exc}")
 
     for col in summary.columns:
         if col not in ("accident_year", "latest_reported") and not col.endswith("_IBNR"):

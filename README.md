@@ -1,110 +1,95 @@
-# IBNR estimation — traditional · Bayesian · tabular ML · deep AI · hybrids
+# Reservas IBNR — Automotores Casco (SSN)
 
-Load **insurance policy / claims** data from an Excel file under `data/raw/`, build a **loss development triangle**, then compare **classical reserving**, **gradient boosting**, **deep learning (PyTorch)**, and **hybrid** estimators that mix traditional and AI ultimates.
+Código de la tesina *Análisis comparativo de métodos tradicionales en la proyección
+de reservas de siniestros no reportados y modelos de Inteligencia Artificial*.
 
-## Data
+Compara ocho estimadores de reserva IBNR sobre un triángulo de run-off del ramo
+Automotores–Casco, ajustando cada uno **dos veces**: sobre el triángulo nominal y
+sobre el triángulo deflactado a moneda constante, con la reserva proyectada
+re-inflada a los años calendario en que se va a pagar.
 
-- Put your workbook in `data/raw/` (default name: `ssn_2025_siniestro_casco.xlsx`), or set `IBNR_RAW_XLSX` to a path.
-- Supported shapes:
-  - **Transactional payments** (recommended): `fecha_siniestro`, `fecha_pago`, `importe_pagado` (column names are normalized to lowercase with underscores).
-  - **Long triangle**: `accident_year`, `development_year`, `cumulative_claims`.
-  - **Pivot-style** triangles (Excel tables with year rows and development columns) — auto-detected when possible.
-
-If the file is missing or not a valid `.xlsx` zip file, a small **demo** workbook is generated so `main.py` runs.
-
-## Tier 1 — Traditional actuarial (`src/traditional/`)
-
-1. **Chain Ladder** — volume-weighted development factors
-2. **Mack Chain Ladder** — stochastic CL with analytic prediction error
-3. **Bornhuetter–Ferguson** — credibility blend of a-priori and emerging experience
-4. **Cape Cod** — experience-based expected loss ratio
-
-## Tier 1+ — Bayesian Chain Ladder (`src/ai/bayesian_chainladder.py`)
-
-Conjugate log-Normal posterior on development factors — no MCMC required.
-Returns full predictive distribution: posterior mean, std, and 90% credible interval.
-Treats the classical CL estimate as an informative prior; data updates the belief.
-
-> Key thesis point: bridges traditional and AI — adds principled uncertainty
-> without changing the chain ladder's structural assumptions.
-
-## Tier 2 — Tabular ML (`src/ml/`)
-
-1. **LightGBM** — histogram-based gradient boosting  
-2. **CatBoost** — symmetric trees, robust to heterogeneous features  
-3. **XGBoost 2.x** — regularised gradient boosting  
-
-Shared engineered features: accident year, development year, calendar year, lagged cumulative.  
-**SHAP attribution** (`src/ml/shap_explainer.py`) decomposes each prediction into feature contributions — critical for actuarial interpretability and regulatory acceptance.
-
-## Tier 3 — Deep AI (`src/ai/`)
-
-All neural models include **MC-dropout uncertainty quantification** (Gal & Ghahramani, 2016):
-dropout stays active during 150 stochastic inference passes; the spread of resulting ultimates
-forms a calibrated predictive distribution.
-
-1. **MLP** — compact feedforward net  
-2. **Deep ResNet** — residual MLP with LayerNorm + GELU  
-3. **GRU** — recurrent model on the cumulative development path; no hand-crafted features  
-4. **Transformer** — self-attention over development tokens `(scaled cumulative, normalised lag)`  
-
-> Key thesis distinction vs Tier 2: sequential AI models learn *representations* of
-> the development path directly — no feature engineering required.
-
-## Tier 4 — Hybrid / ensemble (`src/ai/hybrid_models.py`)
-
-- **Fixed convex blends** — CL + DeepResNet / GRU / Transformer / XGBoost (50/50)
-- **Three-way blend** — CL + BF + DeepResNet (35/25/40)
-- **Credibility Hybrid** — Bühlmann-style weighting: AI models weighted inversely by
-  their MC-dropout std; a traditional anchor receives a fixed 20% credibility weight.
-  This is a *data-driven* replacement for the fixed blends.
-
-## Setup
-
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
 ```
-
-Use the venv interpreter when running scripts (`./venv/bin/python main.py`).
-
-## Run
-
-```bash
 python main.py
 ```
 
-Inspect raw Excel layout:
+Escribe las tablas en `resultados/` y las figuras en `figures/`.
 
-```bash
-python inspect_data.py
-```
+## De dónde salen los datos
 
-## Layout
+El Anuario Estadístico de la SSN (`ssn_2025_siniestro_casco.xlsx`, Anexo II)
+publica exposición, siniestros y frecuencia por hecho generador y por año, pero
+**no publica montos ni desarrollo por año de ocurrencia**, y los datos
+individuales de siniestros son confidenciales. Un triángulo de run-off no se
+puede leer de la fuente oficial: hay que simularlo a partir de ella. Lo que sí
+queda auditable es el límite entre lo que viene del dato y lo que es supuesto.
 
-```
-IBNR/
-├── data/raw/
-├── src/
-│   ├── data/
-│   ├── traditional/           # Chain Ladder, Mack, BF, Cape Cod
-│   ├── ml/                    # Tabular gradient boosting + SHAP
-│   ├── ai/                    # Bayesian CL, neural nets (UQ), hybrids
-│   ├── evaluation/
-│   └── visualization/
-├── main.py
-└── requirements.txt
-```
-
-## Key literature
-
-| Reference | Relevance |
+| Componente | Origen |
 |---|---|
-| Mack (1993) | Stochastic chain ladder — variance estimation |
-| England & Verrall (2002) | Bayesian stochastic reserving |
-| Gal & Ghahramani (2016) | MC-dropout as Bayesian approximation |
-| Kuo (2019) DeepTriangle | GRU / deep learning for loss reserving |
-| Gabrielli, Richman & Wüthrich (2020) | Neural networks for stochastic reserving |
-| Lundberg et al. (2020) | TreeSHAP — exact Shapley values for trees |
-| Wüthrich & Merz (2021) | From GLMs to neural networks and back |
+| Vehículos expuestos a casco | Cuadro 1, `TOTAL − categoría A` (A es RC sin cobertura de casco) |
+| Siniestros y frecuencia | Cuadros 2 y 4 |
+| Mix por hecho generador | Cuadro 2, año por año |
+| Tendencia de severidad | Serie de IPC (`src/data/inflation.py`) |
+| Severidad base, dispersión, patrón de pago | **Supuestos** |
+
+Los años 2015–2024 salen del Anuario; los anteriores se retro-extrapolan y quedan
+marcados como tales en `calibration_provenance()`.
+`ssn_anuario.verify_consistency()` cruza los tres cuadros entre sí: el cociente
+`Cuadro 2 / Cuadro 4` reproduce la exposición derivada del Cuadro 1 con un desvío
+menor al 0,02%.
+
+La serie de IPC tiene la fuente anotada por año. INDEC estuvo intervenido entre
+2007 y 2015, así que ese tramo empalma índices provinciales y alternativos.
+Para usar otra serie, apuntá `IBNR_CPI_CSV` a un CSV con columnas
+`anio,variacion_pct`.
+
+## Modelos
+
+| Sección de la tesis | Modelo | Módulo |
+|---|---|---|
+| 2.1 | Chain Ladder | `traditional/chainladder_model.py` |
+| 2.2 | Bornhuetter-Ferguson | `traditional/bf_model.py` |
+| 2.3 | Mack Chain Ladder, con MSEP | `traditional/mack_model.py` |
+| 3.1 | Bayesian Chain Ladder | `ai/bayesian_chainladder.py` |
+| 3.2 | MLP | `ai/pytorch_mlp.py` |
+| 3.3 | GRU / DeepTriangle | `ai/gru_triangle.py` |
+| 4.1 | CANN sobre GLM Poisson sobredisperso | `ai/cann.py` |
+| 4.2 | Híbrido de credibilidad | `ai/hybrid_models.py` |
+
+## Cómo se mide el error
+
+Contra el **ultimate realmente observado** por año de ocurrencia, que se conoce
+porque el triángulo es sintético (hoja `ultimates_reales` del workbook generado).
+
+Nunca contra la última diagonal. La diagonal es el pagado a la fecha, así que el
+"error" que devuelve esa comparación es la reserva misma: un modelo que constituye
+IBNR cero saca MAPE 0 y R² 1. `compare_models_results` acepta esa comparación como
+fallback pero la etiqueta como sesgada.
+
+## Estructura
+
+```
+main.py                     corrida completa: nominal, moneda constante, sensibilidades
+src/data/
+  ssn_anuario.py            lectura y verificación cruzada de los Cuadros SSN
+  inflation.py              serie de IPC, deflactado y re-inflado
+  sample_policies.py        generador calibrado a la SSN + ground truth
+  transformer.py            triángulo de run-off con corte a fecha de valuación
+  features.py               parametrización en log-factor de desarrollo
+src/traditional/            Chain Ladder, BF, Mack
+src/ai/                     Bayesian CL, MLP, GRU, CANN, híbrido
+src/evaluation/
+  real_terms.py             ajuste en moneda constante y vuelta a nominal
+  sensitivity.py            barridos del ancla y de la inflación futura
+  export.py                 tablas numeradas para el documento
+src/visualization/          figuras
+```
+
+## Supuestos que hay que declarar en el documento
+
+- **Severidad base por tipo de siniestro.** El Anuario de Casco no tiene ningún
+  dato monetario. Es el único parámetro que no se pudo anclar a la fuente oficial.
+- **Inflación futura.** Reservar en moneda constante obliga a explicitarla: la
+  reserva se paga en años que todavía no ocurrieron. Un Chain Ladder nominal no
+  evita el supuesto, lo esconde — sus factores extrapolan implícitamente la
+  inflación que traiga el triángulo histórico. `sensitivity.py` reporta el barrido.
+- **Peso del ancla en el híbrido.** Es un juicio, no un resultado.

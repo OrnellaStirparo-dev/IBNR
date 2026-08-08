@@ -74,55 +74,161 @@ def ultimate_from_pivot(pivot: pd.DataFrame) -> pd.Series:
     return pd.Series(ult, index=pivot.index.astype(int), name="ultimate")
 
 
+def _cumulative_ldf_to_ultimate(ldfs: np.ndarray, j0: int, n_dev: int) -> float:
+    """Cumulative development factor F from column *j0* to the tail."""
+    F = 1.0
+    for j in range(j0, n_dev - 1):
+        F *= ldfs[j]
+    return F
+
+
+def _fully_developed_mask(C: np.ndarray) -> np.ndarray:
+    """True for accident years observed all the way to the last development column."""
+    n_ay, n_dev = C.shape
+    return np.array([_last_observed(C[i]) == n_dev - 1 for i in range(n_ay)])
+
+
+def trended_apriori(
+    pivot: pd.DataFrame,
+    exposure: pd.Series | None = None,
+) -> pd.Series:
+    """
+    Build an a-priori expected ultimate per accident year.
+
+    The a-priori must be expressed **in the nominal currency of its own accident
+    year**. Using a single constant across accident years is invalid whenever
+    severity trends — under Argentine inflation the prior for an early year is
+    orders of magnitude below the amount already paid for a recent one, which
+    drives the Bornhuetter–Ferguson ultimate below the latest cumulative and
+    produces a negative (inadmissible) reserve.
+
+    Two constructions, in order of preference:
+
+    ``exposure`` given
+        Burning-cost prior: ``a_i = exposure_i × mean_j(U_j / exposure_j)`` over
+        the fully developed accident years *j*. ``exposure`` stands in for
+        on-level earned premium (e.g. vehicles exposed × severity index).
+
+    ``exposure`` omitted
+        Log-linear trend fitted to the chain-ladder ultimates of the fully
+        developed accident years and extrapolated forward. Purely data-driven,
+        but it can only extrapolate the *historical* trend — if severity
+        accelerated after the fully developed window, the prior will lag.
+    """
+    pivot = pivot.sort_index()
+    C = pivot.values.astype(float)
+    idx = pivot.index.astype(int)
+    u_cl = ultimate_from_pivot(pivot).values
+    developed = _fully_developed_mask(C) & np.isfinite(u_cl)
+
+    if developed.sum() < 2:
+        raise ValueError(
+            "Need at least 2 fully developed accident years to build an a-priori."
+        )
+
+    if exposure is not None:
+        expo = exposure.reindex(idx).values.astype(float)
+        if not np.all(np.isfinite(expo)) or np.any(expo <= 0):
+            raise ValueError("exposure must be positive and defined for every accident year.")
+        burning_cost = float(np.mean(u_cl[developed] / expo[developed]))
+        return pd.Series(expo * burning_cost, index=idx, name="apriori")
+
+    x = np.arange(len(idx), dtype=float)
+    slope, intercept = np.polyfit(x[developed], np.log(u_cl[developed]), 1)
+    return pd.Series(np.exp(intercept + slope * x), index=idx, name="apriori")
+
+
 def bornhuetter_ferguson_ultimate(
     pivot: pd.DataFrame,
     apriori: pd.Series | None = None,
+    exposure: pd.Series | None = None,
 ) -> pd.Series:
     """
     Bornhuetter–Ferguson ultimates.
 
-    Formula: U = C + (a − C) × (1 − 1/F)
+    Formula (Bornhuetter & Ferguson, 1972)::
 
-    where C is the latest cumulative, a is the a-priori expected ultimate, and
-    F is the cumulative LDF from the current development column to the tail.
+        U_i = C_i + (1 − 1/F_i) × a_i
 
-    If ``apriori`` is None, the volume-weighted mean chain-ladder ultimate is
-    used as a constant prior across all accident years.
+    where ``C_i`` is the latest cumulative paid, ``a_i`` the a-priori expected
+    ultimate for that accident year, and ``F_i`` the cumulative development
+    factor from the current column to the tail.
+
+    Because ``a_i ≥ 0`` and ``F_i ≥ 1``, this always yields ``U_i ≥ C_i`` and
+    therefore a non-negative IBNR. Note that BF applies the unreported
+    proportion to the *a-priori*, never to ``a_i − C_i``: the latter is the
+    Benktander/credibility blend ``U = C/F + a(1 − 1/F)``, which can fall below
+    the amount already paid and is not the Bornhuetter–Ferguson estimator.
+
+    If ``apriori`` is None it is built with :func:`trended_apriori` (using
+    ``exposure`` when supplied).
     """
     pivot = pivot.sort_index().copy()
     C = pivot.values.astype(float)
     n_ay, n_dev = C.shape
     ldfs = _weighted_ldfs(C)
-    u_cl = ultimate_from_pivot(pivot)
+    idx = pivot.index.astype(int)
 
     if apriori is None:
-        mean_ult = float(np.nanmean(u_cl.values))
-        a = np.full(n_ay, mean_ult)
-    else:
-        a = apriori.reindex(pivot.index.astype(int)).values
+        apriori = trended_apriori(pivot, exposure=exposure)
+    a = apriori.reindex(idx).values.astype(float)
 
     out = np.full(n_ay, np.nan)
     for i in range(n_ay):
         j0 = _last_observed(C[i])
         if j0 is None or not np.isfinite(a[i]):
             continue
-        F = 1.0
-        for j in range(j0, n_dev - 1):
-            F *= ldfs[j]
+        F = _cumulative_ldf_to_ultimate(ldfs, j0, n_dev)
         if F <= 0 or not np.isfinite(F):
             continue
-        c_ij = C[i, j0]
-        out[i] = c_ij + (a[i] - c_ij) * (1.0 - 1.0 / F)
+        out[i] = C[i, j0] + (1.0 - 1.0 / F) * a[i]
 
-    return pd.Series(out, index=pivot.index.astype(int), name="bf_ultimate")
+    return pd.Series(out, index=idx, name="bf_ultimate")
 
 
-def cape_cod_proxy(pivot: pd.DataFrame) -> pd.Series:
+def cape_cod_ultimate(
+    pivot: pd.DataFrame,
+    exposure: pd.Series | None = None,
+) -> pd.Series:
     """
-    Cape Cod stand-in (chain-ladder ultimates).
+    Cape Cod (Bühlmann–Straub, 1983) ultimates.
 
-    A true Cape Cod requires on-level earned premium by accident year.
-    Without that exposure triangle this function returns chain-ladder ultimates
-    as a transparent proxy; the caller should document this in results.
+    Estimates a single expected loss ratio from the triangle itself rather than
+    taking it as external input::
+
+        ELR = Σ_i C_i / Σ_i (exposure_i / F_i)
+        U_i = C_i + (1 − 1/F_i) × ELR × exposure_i
+
+    Because the a-priori is re-derived from the observed experience, Cape Cod is
+    materially more robust than BF when the external prior is stale — which is
+    the failure mode under sustained inflation. With ``exposure`` omitted every
+    accident year is given unit exposure, so the ELR absorbs the trend only
+    partially; supply a severity/volume index for a meaningful result.
     """
-    return ultimate_from_pivot(pivot)
+    pivot = pivot.sort_index()
+    C = pivot.values.astype(float)
+    n_ay, n_dev = C.shape
+    ldfs = _weighted_ldfs(C)
+    idx = pivot.index.astype(int)
+
+    expo = (
+        np.ones(n_ay)
+        if exposure is None
+        else exposure.reindex(idx).values.astype(float)
+    )
+
+    used_c = np.full(n_ay, np.nan)
+    used_f = np.full(n_ay, np.nan)
+    for i in range(n_ay):
+        j0 = _last_observed(C[i])
+        if j0 is None:
+            continue
+        used_c[i] = C[i, j0]
+        used_f[i] = _cumulative_ldf_to_ultimate(ldfs, j0, n_dev)
+
+    ok = np.isfinite(used_c) & np.isfinite(used_f) & np.isfinite(expo) & (expo > 0)
+    elr = float(np.sum(used_c[ok]) / np.sum(expo[ok] / used_f[ok]))
+
+    out = np.full(n_ay, np.nan)
+    out[ok] = used_c[ok] + (1.0 - 1.0 / used_f[ok]) * elr * expo[ok]
+    return pd.Series(out, index=idx, name="cape_cod_ultimate")

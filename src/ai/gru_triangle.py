@@ -55,10 +55,6 @@ class GRUStep(nn.Module):
         return self.fc(self.out_drop(h[-1])).squeeze(-1)
 
 
-# --------------------------------------------------------------------------- #
-# Internal helpers — standalone so they can be called with model in any mode  #
-# --------------------------------------------------------------------------- #
-
 def _pivot_cumulative(
     triangle_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, list[int], int]:
@@ -103,10 +99,6 @@ def _roll_forward(
 
     return float(cur[max_dev - 1])
 
-
-# --------------------------------------------------------------------------- #
-# Public API                                                                   #
-# --------------------------------------------------------------------------- #
 
 def run_gru_triangle(
     triangle_df: pd.DataFrame,

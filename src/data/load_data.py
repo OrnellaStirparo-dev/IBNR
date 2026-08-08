@@ -16,7 +16,7 @@ def list_excel_sheets(filepath: str) -> list[str]:
     path = Path(filepath)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {filepath}")
-    
+
     # Determine engine based on file extension
     if path.suffix.lower() == '.xlsx':
         engine = 'openpyxl'
@@ -24,7 +24,7 @@ def list_excel_sheets(filepath: str) -> list[str]:
         engine = 'xlrd'
     else:
         engine = 'openpyxl'
-    
+
     try:
         excel_file = pd.ExcelFile(filepath, engine=engine)
         return excel_file.sheet_names
@@ -35,14 +35,14 @@ def list_excel_sheets(filepath: str) -> list[str]:
 def load_siniestros_data(filepath: str, sheet_name: int | str = 0) -> pd.DataFrame:
     """
     Load a generic siniestros Excel file given an explicit path.
-    
+
     Args:
         filepath: Path to the Excel file
         sheet_name: Sheet to load. Can be:
             - An integer (0-based index): 0 for first sheet, 1 for second sheet, etc.
             - A string: Name of the sheet (e.g., "Sheet2", "Data")
             - Default: 0 (first sheet)
-    
+
     Returns:
         DataFrame with the loaded data
     """
@@ -68,7 +68,7 @@ def load_siniestros_data(filepath: str, sheet_name: int | str = 0) -> pd.DataFra
     try:
         df = pd.read_excel(filepath, sheet_name=sheet_name, engine=engine)
         sheet_info = f"sheet '{sheet_name}'" if isinstance(sheet_name, str) else f"sheet {sheet_name}"
-        print(f"✅ Loaded {len(df)} rows and {len(df.columns)} columns from {path.name} ({sheet_info})")
+        print(f"Loaded {len(df)} rows and {len(df.columns)} columns from {path.name} ({sheet_info})")
         return df
     except Exception as e:
         # If sheet not found, list available sheets
@@ -85,18 +85,15 @@ def load_siniestros_data(filepath: str, sheet_name: int | str = 0) -> pd.DataFra
             )
 
 
-def load_claims_triangle(sheet_name: int | str = 0) -> pd.DataFrame:
+def resolve_raw_path() -> Path:
     """
-    Load insurance policy / claims data from ``data/raw/*.xlsx``.
+    Resolve the raw claims workbook, writing the synthetic dataset if absent.
 
     Resolution order:
 
     1. Environment variable ``IBNR_RAW_XLSX`` (absolute or relative path).
     2. ``data/raw/ssn_2025_siniestro_casco.xlsx`` (project root).
     3. First ``*.xlsx`` file in ``data/raw/``.
-
-    If the file is missing or not a valid ``.xlsx`` zip archive, a small demo
-    workbook is written so the pipeline can run end-to-end.
     """
     from src.data.sample_policies import write_demo_policies_excel
 
@@ -112,21 +109,52 @@ def load_claims_triangle(sheet_name: int | str = 0) -> pd.DataFrame:
     if raw_dir.is_dir():
         candidates.extend(sorted(raw_dir.glob("*.xlsx")))
 
-    default_path: Path | None = None
     for path in candidates:
         path = path.resolve() if path.is_absolute() else (project_root / path).resolve()
         if path.is_file() and _is_zip_xlsx(path):
-            default_path = path
-            break
+            return path
 
+    raw_dir.mkdir(parents=True, exist_ok=True)
     demo_path = raw_dir / default_name
-    if default_path is None:
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        write_demo_policies_excel(demo_path)
-        default_path = demo_path.resolve()
-    elif not _is_zip_xlsx(default_path):
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        write_demo_policies_excel(demo_path)
-        default_path = demo_path.resolve()
+    write_demo_policies_excel(demo_path)
+    return demo_path.resolve()
 
-    return load_siniestros_data(str(default_path), sheet_name=sheet_name)
+
+def load_true_ultimates() -> pd.Series | None:
+    """
+    Load the realised ultimate per accident year from the ``ultimates_reales``
+    sheet of the raw workbook, if present.
+
+    Only synthetic data has this sheet — it is the ground truth for backtesting,
+    and it is what accuracy metrics must be scored against. Returns ``None``
+    when the workbook has no such sheet, in which case no valid accuracy
+    comparison is possible and the caller should say so.
+    """
+    path = resolve_raw_path()
+    try:
+        df = pd.read_excel(path, sheet_name="ultimates_reales", engine="openpyxl")
+    except Exception:
+        return None
+
+    if not {"accident_year", "true_ultimate"}.issubset(df.columns):
+        return None
+
+    s = df.set_index("accident_year")["true_ultimate"]
+    s.index = [int(x) for x in s.index]
+    return s.rename("true_ultimate")
+
+
+def load_claims_triangle(sheet_name: int | str = 0) -> pd.DataFrame:
+    """
+    Load insurance policy / claims data from ``data/raw/*.xlsx``.
+
+    Resolution order:
+
+    1. Environment variable ``IBNR_RAW_XLSX`` (absolute or relative path).
+    2. ``data/raw/ssn_2025_siniestro_casco.xlsx`` (project root).
+    3. First ``*.xlsx`` file in ``data/raw/``.
+
+    If the file is missing or not a valid ``.xlsx`` zip archive, the synthetic
+    dataset is written so the pipeline can run end-to-end.
+    """
+    return load_siniestros_data(str(resolve_raw_path()), sheet_name=sheet_name)

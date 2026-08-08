@@ -52,10 +52,10 @@ MANIFEST
 ehthumbs.db
 Thumbs.db
 
-# Data files (optional - uncomment if you don't want to track data)
-# data/raw/
-# data/processed/
-# data/external/
+# Dataset sintetico: lo regenera src/data/sample_policies.py con semilla fija,
+# no tiene sentido versionar 18 MB reproducibles. El Anuario real de la SSN
+# vive en la raiz del repo y si se versiona.
+data/raw/*.xlsx
 
 # Model files
 *.pkl
@@ -71,3 +71,11 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+
+# Generadores y salidas de los documentos de la tesina (no forman parte del codigo)
+build_doc.py
+build_anexo.py
+secciones_5_6_7.docx
+secciones_5_6_7.html
+anexo_a.html
+.doc_assets/
