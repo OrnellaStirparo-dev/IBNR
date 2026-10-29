@@ -38,7 +38,6 @@ os.environ["OMP_NUM_THREADS"] = "1"
 import numpy as np
 import pandas as pd
 
-from src.ai.bayesian_chainladder import run_bayesian_chainladder
 from src.ai.cann import odp_glm_ultimate, run_cann
 from src.ai.gru_triangle import run_gru_triangle
 from src.ai.hybrid_models import run_credibility_hybrid
@@ -57,6 +56,7 @@ from src.evaluation.comparison import compare_models_results, create_model_summa
 from src.evaluation.export import write_thesis_tables
 from src.evaluation.real_terms import reinflate_ultimates
 from src.evaluation.sensitivity import anchor_weight_sweep, future_inflation_sweep
+from src.traditional.bayesian_chainladder import run_bayesian_chainladder
 from src.traditional.bf_model import run_bornhuetter_ferguson
 from src.traditional.chain_ladder_manual import _weighted_ldfs, cumulative_pivot_from_long
 from src.traditional.chainladder_model import run_chainladder
@@ -122,6 +122,19 @@ def _fit_all_models(triangle_df: pd.DataFrame, exposure: pd.Series, label: str):
         except Exception as exc:
             print(f"     fallo: {name}: {exc}")
 
+    # The Bayesian Chain Ladder belongs with the traditional methods: it keeps
+    # the chain-ladder structure and only treats the factors as random. It is
+    # handled apart from the loop above because it is the one traditional runner
+    # that also returns a predictive distribution, which the uncertainty figure
+    # needs registered alongside the neural models.
+    try:
+        mean, std, *_ = run_bayesian_chainladder(triangle_df)
+        ultimates["Bayesian Chain Ladder"] = mean
+        uncertainty["Bayesian Chain Ladder"] = (mean, std)
+        print("     Bayesian Chain Ladder")
+    except Exception as exc:
+        print(f"     fallo: Bayesian Chain Ladder: {exc}")
+
     print(f"  ── Inteligencia artificial ({label}) ──")
     # Each runner is adapted to (mean, std) explicitly. Unpacking the last two
     # elements positionally is not safe: the neural runners return
@@ -130,10 +143,6 @@ def _fit_all_models(triangle_df: pd.DataFrame, exposure: pd.Series, label: str):
     # its 5th and 95th percentiles and reports the lower credible bound as the
     # point estimate.
     for name, fn in [
-        (
-            "Bayesian Chain Ladder",
-            lambda: run_bayesian_chainladder(triangle_df)[:2],
-        ),
         ("MLP", lambda: run_pytorch_mlp(triangle_df)[-2:]),
         ("GRU", lambda: run_gru_triangle(triangle_df)[-2:]),
     ]:

@@ -25,10 +25,11 @@ the source of each figure. INDEC's national CPI was intervened between 2007 and
 2015 and its published figures for those years are widely held to understate
 actual inflation, so the series splices provincial and alternative indices over
 that window — a standard choice in Argentine applied work, and one that has to
-be stated rather than assumed.
+be stated rather than assumed. Every year in ``_CPI_ANNUAL`` names the published
+series it comes from (CENDA IPC-7 Provincias 2007–2010, IPC Congreso 2011–2014,
+IPCBA 2015–2016).
 
-**Validate before citing.** These are working values, not a substitute for the
-official download. Point ``IBNR_CPI_CSV`` at a two-column CSV
+To try a different series, point ``IBNR_CPI_CSV`` at a two-column CSV
 (``anio,variacion_pct``) to override the whole series with a source you can cite
 directly; :func:`cpi_source_table` prints what is in force.
 
@@ -46,20 +47,27 @@ import numpy as np
 import pandas as pd
 
 # year: (December-to-December variation in %, source)
+#
+# 2007–2016: INDEC's CPI was intervened (2007–2015) and then discontinued until
+# mid-2016, so each year is taken from a published alternative series:
+#   2007–2010  IPC-7 Provincias, CENDA (variación anual dic./dic.)
+#   2011–2014  "IPC Congreso", average of private consultancies published by
+#              opposition legislators
+#   2015–2016  IPCBA, Dirección General de Estadística y Censos (CABA)
 _CPI_ANNUAL: dict[int, tuple[float, str]] = {
     2004: (6.1, "INDEC IPC-GBA"),
     2005: (12.3, "INDEC IPC-GBA"),
     2006: (9.8, "INDEC IPC-GBA"),
-    2007: (25.7, "IPC alternativo (INDEC intervenido)"),
-    2008: (23.0, "IPC alternativo (INDEC intervenido)"),
-    2009: (14.8, "IPC alternativo (INDEC intervenido)"),
-    2010: (25.0, "IPC alternativo (INDEC intervenido)"),
-    2011: (22.8, "IPC alternativo (INDEC intervenido)"),
-    2012: (25.6, "IPC alternativo (INDEC intervenido)"),
-    2013: (28.4, "IPC alternativo (INDEC intervenido)"),
-    2014: (38.5, "IPC alternativo (INDEC intervenido)"),
-    2015: (26.9, "IPC CABA (sin publicación nacional)"),
-    2016: (39.4, "IPC CABA / INDEC parcial"),
+    2007: (25.8, "IPC-7 Provincias (CENDA)"),
+    2008: (22.0, "IPC-7 Provincias (CENDA)"),
+    2009: (15.3, "IPC-7 Provincias (CENDA)"),
+    2010: (26.1, "IPC-7 Provincias (CENDA)"),
+    2011: (22.8, "IPC Congreso"),
+    2012: (25.6, "IPC Congreso"),
+    2013: (28.4, "IPC Congreso"),
+    2014: (38.5, "IPC Congreso"),
+    2015: (26.9, "IPCBA (Estadística Ciudad de Buenos Aires)"),
+    2016: (41.0, "IPCBA (Estadística Ciudad de Buenos Aires)"),
     2017: (24.8, "INDEC IPC Nacional"),
     2018: (47.6, "INDEC IPC Nacional"),
     2019: (53.8, "INDEC IPC Nacional"),

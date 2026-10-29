@@ -38,7 +38,9 @@ marcados como tales en `calibration_provenance()`.
 menor al 0,02%.
 
 La serie de IPC tiene la fuente anotada por año. INDEC estuvo intervenido entre
-2007 y 2015, así que ese tramo empalma índices provinciales y alternativos.
+2007 y 2015, así que ese tramo empalma índices provinciales y alternativos;
+los valores de 2007–2016 están marcados como de trabajo y hay que validarlos
+contra una fuente citable antes de publicar.
 Para usar otra serie, apuntá `IBNR_CPI_CSV` a un CSV con columnas
 `anio,variacion_pct`.
 
@@ -49,11 +51,32 @@ Para usar otra serie, apuntá `IBNR_CPI_CSV` a un CSV con columnas
 | 2.1 | Chain Ladder | `traditional/chainladder_model.py` |
 | 2.2 | Bornhuetter-Ferguson | `traditional/bf_model.py` |
 | 2.3 | Mack Chain Ladder, con MSEP | `traditional/mack_model.py` |
-| 3.1 | Bayesian Chain Ladder | `ai/bayesian_chainladder.py` |
+| 2.4 | Bayesian Chain Ladder | `traditional/bayesian_chainladder.py` |
 | 3.2 | MLP | `ai/pytorch_mlp.py` |
 | 3.3 | GRU / DeepTriangle | `ai/gru_triangle.py` |
 | 4.1 | CANN sobre GLM Poisson sobredisperso | `ai/cann.py` |
 | 4.2 | Híbrido de credibilidad | `ai/hybrid_models.py` |
+
+## Robustez: múltiples realizaciones
+
+`main.py` evalúa una sola realización del generador (semilla 42). `simulaciones.py`
+repite el ejercicio con una cartera simulada distinta por semilla y reporta, por
+modelo y unidad de cuenta, el error medio sobre la reserva total, sus percentiles
+5 y 95, WMAPE, MAE, RMSE y el porcentaje de realizaciones en que cada modelo
+queda primero.
+
+```
+python simulaciones.py --seeds 30 --jobs 4                      # Tabla 6.3
+python simulaciones.py --seeds 15 --jobs 4 --gen-future 60      # Tabla 6.4
+python simulaciones.py --seeds 15 --jobs 4 --gen-future 25      # Tabla 6.4
+```
+
+`--gen-future X` hace que el generador use una inflación futura de X % anual
+mientras el modelo sigue suponiendo `DEFAULT_FUTURE_INFLATION_PCT` (40 %). Sin
+esa opción ambas coinciden, lo que equivale a que el actuario acierte la
+inflación futura exacta. `--sin-redes` corre solo CL, BF y Bayesian CL, sin
+PyTorch. Salidas: `resultados/simulaciones_resumen*.csv` y
+`resultados/simulaciones_detalle*.csv`.
 
 ## Cómo se mide el error
 
@@ -69,14 +92,15 @@ fallback pero la etiqueta como sesgada.
 
 ```
 main.py                     corrida completa: nominal, moneda constante, sensibilidades
+simulaciones.py             múltiples realizaciones y escenarios de inflación futura
 src/data/
   ssn_anuario.py            lectura y verificación cruzada de los Cuadros SSN
   inflation.py              serie de IPC, deflactado y re-inflado
   sample_policies.py        generador calibrado a la SSN + ground truth
   transformer.py            triángulo de run-off con corte a fecha de valuación
   features.py               parametrización en log-factor de desarrollo
-src/traditional/            Chain Ladder, BF, Mack
-src/ai/                     Bayesian CL, MLP, GRU, CANN, híbrido
+src/traditional/            Chain Ladder, BF, Mack, Bayesian CL
+src/ai/                     MLP, GRU, CANN, híbrido
 src/evaluation/
   real_terms.py             ajuste en moneda constante y vuelta a nominal
   sensitivity.py            barridos del ancla y de la inflación futura
@@ -92,4 +116,6 @@ src/visualization/          figuras
   reserva se paga en años que todavía no ocurrieron. Un Chain Ladder nominal no
   evita el supuesto, lo esconde — sus factores extrapolan implícitamente la
   inflación que traiga el triángulo histórico. `sensitivity.py` reporta el barrido.
+  El generador usa la misma tasa para el ground truth; `simulaciones.py
+  --gen-future` mide qué pasa cuando el supuesto no acierta.
 - **Peso del ancla en el híbrido.** Es un juicio, no un resultado.
