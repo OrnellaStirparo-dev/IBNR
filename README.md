@@ -119,3 +119,12 @@ src/visualization/          figuras
   El generador usa la misma tasa para el ground truth; `simulaciones.py
   --gen-future` mide qué pasa cuando el supuesto no acierta.
 - **Peso del ancla en el híbrido.** Es un juicio, no un resultado.
+
+## Validación sobre cartera empírica (Schedule P)
+
+`python empirico.py --lines all` ajusta los estimadores sobre 187 triángulos reales de la
+base NAIC Schedule P (CAS Loss Reserving Database; subconjunto de Meyers, 2015, y Kuo, 2019)
+y los mide contra el *ultimate* efectivamente pagado. Incluye diagnósticos de homogeneidad
+(`src/evaluation/homogeneity.py`) y tres configuraciones: un triángulo (C1), varias compañías
+del mismo ramo (C2) y varios ramos (C3, `src/ai/pooled_mlp.py`).
+`python resumen_empirico.py` genera `resultados/empirico/resumen_empirico.xlsx`.

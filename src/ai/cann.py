@@ -71,8 +71,14 @@ def fit_odp_glm(
     """
     inc = _incremental_from_pivot(pivot)
     Y = inc.values.astype(float)
-    observed = np.isfinite(Y) & (Y > 0)
-    if not observed.any():
+    # Every observed increment enters the row and column totals, including
+    # zero or negative ones (salvage and subrogation recoveries). The ODP
+    # quasi-likelihood only needs positive *fitted* means, not positive
+    # observations, and dropping the negative cells breaks the equivalence with
+    # the chain ladder: on real auto triangles with late recoveries the GLM
+    # reserve was found to be up to twenty times the chain-ladder one.
+    observed = np.isfinite(Y)
+    if not (observed & (Y > 0)).any():
         raise ValueError("No positive incremental cells to fit the ODP GLM on.")
 
     n_ay, n_dev = Y.shape
@@ -157,8 +163,13 @@ def _features(ay_idx: np.ndarray, dev_idx: np.ndarray, n_ay: int, n_dev: int) ->
     """
     ay = 2.0 * ay_idx / max(n_ay - 1, 1) - 1.0
     dev = 2.0 * dev_idx / max(n_dev - 1, 1) - 1.0
+    # Scaled by the last *observed* calendar period (n_ay − 1), the same for
+    # training and for prediction. Scaling by the maximum of whatever cells are
+    # passed in maps the future cells onto the training range and evaluates the
+    # correction at the wrong points; with a fixed scale the future calendar
+    # periods fall in (1, 2], i.e. they are recognised as an extrapolation.
     cal = ay_idx + dev_idx
-    cal = 2.0 * cal / max(cal.max(), 1) - 1.0
+    cal = 2.0 * cal / max(n_ay - 1, 1) - 1.0
     return np.column_stack([ay, dev, cal, ay * dev]).astype(np.float32)
 
 
