@@ -21,6 +21,16 @@ Training weights: within each triangle cells are weighted by their volume
 (the chain-ladder weighting of equation 1), normalised so that every triangle
 carries the same total weight; otherwise the three or four largest insurers
 would define the pattern for everyone.
+
+Cells with a negative increment (``C_{i,j+1} < C_{i,j}``, a net recovery over
+the period) are **excluded from this network's training set**. The target is
+``log(C_{i,j+1}/C_{i,j})`` and the roll-forward clamps the predicted log factor
+at zero, so the model has no way to represent a decrease in the first place.
+The recoveries themselves are kept everywhere else: they remain in the
+triangle, in the observed cumulative each projection starts from, and in the
+traditional estimators, whose volume-weighted factors absorb them (see
+``src.data.schedule_p.usable``, which deliberately retains them as part of real
+auto experience). Only the network's supervision drops those cells.
 """
 
 from __future__ import annotations
