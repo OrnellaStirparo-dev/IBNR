@@ -31,6 +31,7 @@ def anchor_weight_sweep(
     latest: pd.Series,
     true_ultimates: pd.Series | None = None,
     weights: np.ndarray | None = None,
+    transform: Callable[[pd.Series], pd.Series] | None = None,
 ) -> pd.DataFrame:
     """
     Reserve implied by the credibility hybrid across anchor weights 0 → 1.
@@ -38,11 +39,23 @@ def anchor_weight_sweep(
     Weight 0 is a pure AI ensemble, weight 1 is the anchor itself; the useful
     reading is where in between the error curve actually bottoms out, and how
     flat it is around that point.
+
+    ``transform``
+        Optional map from the blended ultimate to the scale *latest* is
+        expressed in, applied before the reserve is read off. For a
+        constant-currency run it carries the blend back to nominal exactly as
+        the headline table does (deflated fit → reserve spread over the
+        calendar years of payment → each slice re-inflated at its own index),
+        so the sweep and the reported hybrid error come from one procedure
+        rather than two implementations of it. Omitted, the blend is already on
+        the right scale and is used as is.
     """
     grid = np.linspace(0.0, 1.0, 21) if weights is None else np.asarray(weights)
     rows = []
     for w in grid:
         ult = run_credibility_hybrid(ai_candidates, anchor=anchor, anchor_weight=float(w))
+        if transform is not None:
+            ult = transform(ult)
         ibnr = float((ult - latest.reindex(ult.index)).sum())
         row = {"anchor_weight": float(w), "ibnr_total": ibnr}
         if true_ultimates is not None:

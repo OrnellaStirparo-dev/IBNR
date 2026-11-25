@@ -284,7 +284,7 @@ def main() -> None:
     nominal_ult, nominal_uq = _fit_all_models(triangle_df, exposure, "nominal")
 
     _header(f"CORRIDA B — MONEDA CONSTANTE (base {DEFLATION_BASE_YEAR})")
-    real_ult_raw, _ = _fit_all_models(
+    real_ult_raw, real_uq = _fit_all_models(
         real_df,
         deflate_exposure(exposure, DEFLATION_BASE_YEAR),
         "deflactado",
@@ -339,6 +339,36 @@ def main() -> None:
         except Exception as exc:
             print(f"  fallo: sensibilidad del ancla: {exc}")
 
+    # El mismo barrido sobre la corrida deflactada. El híbrido se arma en
+    # moneda constante (ancla y ensemble deflactados, como en _fit_all_models
+    # sobre real_df) y recién la mezcla se reexpresa a nominal con
+    # reinflate_ultimates, que es el camino de la tabla de moneda constante.
+    anchor_sweep_real = pd.DataFrame()
+    ai_candidates_real = {
+        name: real_uq[name] for name in ("MLP", "GRU") if name in real_uq
+    }
+    if ai_candidates_real and "Chain Ladder" in real_ult_raw:
+        try:
+            anchor_sweep_real = anchor_weight_sweep(
+                ai_candidates_real,
+                real_ult_raw["Chain Ladder"],
+                latest,
+                true_ultimates,
+                transform=lambda u: reinflate_ultimates(
+                    u, real_pivot, pivot, DEFLATION_BASE_YEAR
+                ),
+            )
+            best_real = anchor_sweep_real.loc[anchor_sweep_real.error_pct.abs().idxmin()]
+            print("\n  Peso del ancla en el híbrido, ajuste en moneda constante:")
+            print(anchor_sweep_real.iloc[::4].round(2).to_string(index=False))
+            print(
+                f"\n  Error mínimo en peso {best_real.anchor_weight:.2f} "
+                f"({best_real.error_pct:+.1f}%). El 20% fijo da "
+                f"{anchor_sweep_real.loc[anchor_sweep_real.anchor_weight.sub(0.20).abs().idxmin(), 'error_pct']:+.1f}%."
+            )
+        except Exception as exc:
+            print(f"  fallo: sensibilidad del ancla en moneda constante: {exc}")
+
     inflation_sweep = pd.DataFrame()
     try:
         inflation_sweep = future_inflation_sweep(
@@ -369,6 +399,8 @@ def main() -> None:
     (real_pivot / 1e6).round(3).to_csv(out_dir / "triangulo_real_MARS.csv")
     if not anchor_sweep.empty:
         anchor_sweep.to_csv(out_dir / "sensibilidad_ancla.csv", index=False)
+    if not anchor_sweep_real.empty:
+        anchor_sweep_real.to_csv(out_dir / "sensibilidad_ancla_constante.csv", index=False)
     if not inflation_sweep.empty:
         inflation_sweep.to_csv(out_dir / "sensibilidad_inflacion.csv", index=False)
 
