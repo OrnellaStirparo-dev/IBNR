@@ -90,6 +90,52 @@ def c3_vs_c2(r: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).T
 
 
+def extremos(r: pd.DataFrame, umbral: float = 1000.0) -> tuple[pd.DataFrame, int]:
+    """
+    Carteras en que algún estimador se va por encima de *umbral* por ciento.
+
+    Son las que vuelven inútil cualquier promedio de |E|: el denominador del
+    error es la reserva realizada, y en estas carteras es casi nula, de modo
+    que una diferencia pequeña en pesos se convierte en un porcentaje
+    arbitrariamente grande. Conviene tenerlas contadas y explícitas antes de
+    leer las medias de ``summary``.
+    """
+    ext = r[r["E"].abs() > umbral]
+    carteras = ext[["lob", "group_code"]].drop_duplicates()
+    por_modelo = (ext.model.value_counts().rename("carteras").rename_axis("model")
+                  .reset_index())
+    return por_modelo, len(carteras)
+
+
+def celdas_no_positivas() -> tuple[int, int, int]:
+    """
+    Triángulos con alguna celda de acumulado no positivo, de los utilizables.
+
+    Esas celdas quedan fuera de los factores de desarrollo (ver el docstring
+    de ``src.traditional.chain_ladder_manual``), así que el dato dice sobre
+    cuántas carteras los métodos multiplicativos trabajan con menos
+    información de la que el triángulo aparenta tener.
+    """
+    from src.data.schedule_p import (
+        LINES, full_square, load_schedule_p, premium, upper_triangle, usable,
+    )
+
+    d = load_schedule_p()
+    n_tri = n_cel = total = 0
+    for lob in LINES:
+        for code in sorted(d.loc[d.lob == lob, "group_code"].unique()):
+            sq, pr = full_square(d, lob, code), premium(d, lob, code)
+            if not usable(sq, pr):
+                continue
+            total += 1
+            up = upper_triangle(sq).values
+            k = int(np.sum(np.isfinite(up) & (up <= 0)))
+            if k:
+                n_tri += 1
+                n_cel += k
+    return n_tri, total, n_cel
+
+
 def main() -> None:
     res = pd.read_csv(OUT / "resultados_por_compania.csv", dtype={"group_code": str})
     diag = pd.read_csv(OUT / "homogeneidad.csv", dtype={"group_code": str})
@@ -141,6 +187,17 @@ def main() -> None:
 
     print("\nC3 (multirramo) contra C2 (mismo ramo), por ramo:")
     print(c3_vs_c2(r).to_string(float_format=lambda v: f"{v:,.3g}"))
+
+    por_modelo, n_carteras = extremos(r)
+    n_tot = len(r[["lob", "group_code"]].drop_duplicates())
+    print(f"\nCarteras con algún |E| > 1000 %: {n_carteras} de {n_tot}. "
+          "Las medias de |E| no son interpretables con estos casos dentro;")
+    print("la reserva realizada que va al denominador es casi nula. Veces por modelo:")
+    print(por_modelo.to_string(index=False))
+
+    n_tri, n_usables, n_cel = celdas_no_positivas()
+    print(f"\nTriángulos con alguna celda de acumulado no positivo: {n_tri} de {n_usables} "
+          f"({n_cel} celdas). Quedan fuera de los factores de desarrollo.")
 
     print(f"\nCobertura del intervalo Mack ±1,96·se sobre la reserva real: {cov['WMAPE'].mean()*100:.1f} % "
           f"(autos part.: {cov[cov.lob=='private_passenger_auto']['WMAPE'].mean()*100:.1f} %)")

@@ -1,0 +1,6 @@
+dimension,indicador,valor,umbral,supera_umbral,nota
+volumen,salto máximo de exposición entre años,0.08893925191743673,0.5,False,máximo en 2018
+siniestralidad,"CV de C[i,1] / vehículos expuestos",0.12406122776342439,0.35,False,
+desarrollo,"CV de f[i,1] = C[i,2]/C[i,1]",0.0509759858474614,0.25,False,
+desarrollo,"tendencia de Spearman de f[i,1]",0.6964912280701754,,True,p = 0.0009
+global,homogéneo,0.0,,True,marcado por desarrollo

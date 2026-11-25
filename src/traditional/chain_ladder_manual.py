@@ -3,6 +3,23 @@ Volume-weighted chain ladder and derived reserving methods (pandas / numpy only)
 
 All public functions accept a pivot DataFrame (rows = accident years,
 columns = development years, values = cumulative paid claims).
+
+Non-positive cumulatives
+------------------------
+A cell whose cumulative is zero or negative is excluded from the development
+factors, and so is the cell that follows it in the same accident year: the
+factor is a ratio of cumulatives, and a non-positive denominator makes it
+meaningless (or inverts its sign). ``_last_observed`` applies the same rule, so
+a projection never starts from such a cell either.
+
+This is a modelling decision, not a data-cleaning step, and it loses
+information: the successor cell drops out of the numerator as well, so a column
+is estimated on fewer accident years than it appears to have. It shows up on
+real paid triangles where salvage and subrogation recoveries exceed payments
+early on — three of the 187 Schedule P portfolios used in ``empirico.py`` carry
+such a cell (see ``resumen_empirico.py``, which counts them). The alternative,
+reading those cells as genuine negative development, would require a method
+that is not multiplicative.
 """
 
 from __future__ import annotations
@@ -17,6 +34,11 @@ def _weighted_ldfs(C: np.ndarray) -> np.ndarray:
 
     LDF_j = sum_i(C[i, j+1]) / sum_i(C[i, j])  for all rows i where both
     cells are finite and C[i, j] > 0.
+
+    The ``C[i, j] > 0`` condition drops the whole pair (i, j), (i, j+1) from
+    column j: a non-positive cumulative cannot serve as the denominator of a
+    development factor, and carrying its successor into the numerator alone
+    would bias the factor upwards. See the module docstring.
     """
     n_ay, n_dev = C.shape
     ldfs = np.ones(n_dev - 1)
